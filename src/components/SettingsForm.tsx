@@ -246,24 +246,33 @@ function ModelRow({ id, note, on, onPick }: { id: string; note: string; on: bool
  * Device-code sign-in against the same OAuth client OpenAI's Codex CLI uses. Shows a code,
  * opens the verification page, and polls until the account appears.
  */
+type Attempt =
+  | { id: string; mode: "browser"; url: string }
+  | { id: string; mode: "device"; userCode: string; verificationUrl: string; intervalSeconds: number };
+
+const CHATGPT_SECURITY_SETTINGS = "https://chatgpt.com/#settings/Security";
+
 function CodexLogin({ state, onChange }: { state: CodexState; onChange: (c: CodexState) => void }) {
-  const [attempt, setAttempt] = useState<{ id: string; userCode: string; verificationUrl: string; intervalSeconds: number } | null>(null);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  async function start() {
+  async function start(mode: "browser" | "device") {
+    if (timer.current) clearTimeout(timer.current);
+    if (attempt) fetch("/api/auth/codex", { method: "POST", body: JSON.stringify({ id: attempt.id, cancel: true }) }).catch(() => {});
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/auth/codex", { method: "POST", body: "{}" });
+    setAttempt(null);
+    const res = await fetch("/api/auth/codex", { method: "POST", body: JSON.stringify({ mode }) });
     const json = await res.json();
     setBusy(false);
     if (!res.ok) return setError(json.error ?? "Could not start sign-in.");
     setAttempt(json);
-    window.open(json.verificationUrl, "_blank", "noopener");
-    poll(json.id, Math.max(3, json.intervalSeconds) * 1000);
+    window.open(json.mode === "browser" ? json.url : json.verificationUrl, "_blank", "noopener");
+    poll(json.id, json.mode === "browser" ? 2000 : Math.max(3, json.intervalSeconds) * 1000);
   }
 
   function poll(id: string, everyMs: number) {
@@ -283,6 +292,7 @@ function CodexLogin({ state, onChange }: { state: CodexState; onChange: (c: Code
 
   function cancel() {
     if (timer.current) clearTimeout(timer.current);
+    if (attempt) fetch("/api/auth/codex", { method: "POST", body: JSON.stringify({ id: attempt.id, cancel: true }) }).catch(() => {});
     setAttempt(null);
   }
 
@@ -305,7 +315,18 @@ function CodexLogin({ state, onChange }: { state: CodexState; onChange: (c: Code
           </div>
           <button className="mono text-[11px] text-faint hover:text-rust" onClick={signOut}>sign out</button>
         </div>
-      ) : attempt ? (
+      ) : attempt?.mode === "browser" ? (
+        <div>
+          <div className="text-[13px] text-ink-2">Finish signing in on the OpenAI tab that opened. This page updates on its own.</div>
+          <div className="mt-3 flex flex-wrap items-center gap-4 text-[12px] text-muted">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber" />
+            Waiting for the browser…
+            <a href={attempt.url} target="_blank" rel="noreferrer" className="mono text-muted hover:text-amber">reopen the sign-in page ↗</a>
+            <button className="mono text-[11px] text-faint hover:text-ink" onClick={() => start("device")}>use a device code instead</button>
+            <button className="mono text-[11px] text-faint hover:text-ink" onClick={cancel}>cancel</button>
+          </div>
+        </div>
+      ) : attempt?.mode === "device" ? (
         <div>
           <div className="text-[13px] text-ink-2">Enter this code on the page that opened, then approve access.</div>
           <div className="mt-3 flex flex-wrap items-center gap-4">
@@ -314,16 +335,23 @@ function CodexLogin({ state, onChange }: { state: CodexState; onChange: (c: Code
               {attempt.verificationUrl.replace("https://", "")} ↗
             </a>
           </div>
-          <div className="mt-3 flex items-center gap-3 text-[12px] text-muted">
+          <p className="mt-3 text-[12px] text-muted">
+            If OpenAI says device code authorization is off, enable it under{" "}
+            <a href={CHATGPT_SECURITY_SETTINGS} target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-[3px] hover:text-amber">ChatGPT Security Settings</a>{" "}
+            and try again, or go back to the browser sign-in, which does not need it.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-[12px] text-muted">
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber" />
             Waiting for approval…
+            <button className="mono text-[11px] text-faint hover:text-ink" onClick={() => start("browser")}>use the browser instead</button>
             <button className="mono text-[11px] text-faint hover:text-ink" onClick={cancel}>cancel</button>
           </div>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <button className="btn" onClick={start} disabled={busy}>{busy ? "Starting…" : "Sign in with ChatGPT"}</button>
-          <span className="text-[12px] text-muted">Plus, Pro, or Team plan with Codex access.</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn" onClick={() => start("browser")} disabled={busy}>{busy ? "Starting…" : "Sign in with ChatGPT"}</button>
+          <button className="mono text-[11px] text-muted hover:text-ink" onClick={() => start("device")} disabled={busy}>or use a device code</button>
+          <span className="ml-auto text-[12px] text-muted">Plus, Pro, or Team plan with Codex access.</span>
         </div>
       )}
       {error && <p className="text-[12px] text-rust">{error}</p>}

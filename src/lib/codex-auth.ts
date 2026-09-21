@@ -1,16 +1,26 @@
+import { createServer, type Server } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 import { readSettings, writeSettings } from "./settings";
 
 /**
- * ChatGPT subscription login for the OpenAI Codex backend, via the device-code flow.
+ * ChatGPT subscription login for the OpenAI Codex backend.
  *
- * This reuses the OAuth client of OpenAI's own Codex CLI, the same approach pi and
- * opencode take. OpenAI has neither blessed nor blocked third-party use of it. The
- * settings page labels it "unofficial" for that reason.
+ * Two flows, both borrowed from OpenAI's own Codex CLI (the same approach pi and opencode take):
+ *  - browser: PKCE authorization code, caught by a short-lived local server on port 1455, which is
+ *    the redirect URI registered for that client. Works for every account.
+ *  - device code: enter a code on openai.com. Needs "device code authorization for Codex" enabled
+ *    in the account's ChatGPT security settings, so it is the fallback.
+ * OpenAI has neither blessed nor blocked third-party use of either. The settings page says so.
  */
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTH_BASE = "https://auth.openai.com";
+const AUTHORIZE_URL = `${AUTH_BASE}/oauth/authorize`;
 const TOKEN_URL = `${AUTH_BASE}/oauth/token`;
+const CALLBACK_PORT = 1455;
+const CALLBACK_PATH = "/auth/callback";
+const BROWSER_REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
+const BROWSER_TIMEOUT_MS = 10 * 60_000;
 const DEVICE_USER_CODE_URL = `${AUTH_BASE}/api/accounts/deviceauth/usercode`;
 const DEVICE_TOKEN_URL = `${AUTH_BASE}/api/accounts/deviceauth/token`;
 const DEVICE_REDIRECT_URI = `${AUTH_BASE}/deviceauth/callback`;
@@ -79,6 +89,131 @@ function toCredential(t: { access: string; refresh: string; expires: number; idT
   };
 }
 
+/* ---------------- Browser flow ---------------- */
+
+export type BrowserPending = {
+  url: string;
+  startedAt: number;
+  /** Resolves with the credential once the callback lands, or rejects on failure or timeout. */
+  done: Promise<CodexCredential>;
+  cancel: () => void;
+};
+
+let activeServer: Server | null = null;
+
+async function exchangeCode(code: string, verifier: string, redirectUri: string): Promise<CodexCredential> {
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "authorization_code", client_id: CLIENT_ID, code, code_verifier: verifier, redirect_uri: redirectUri }),
+  });
+  const cred = toCredential(await readToken(res, "exchange"));
+  await saveCredential(cred);
+  return cred;
+}
+
+function page(title: string, body: string): string {
+  return `<!doctype html><meta charset="utf-8"><title>${title}</title>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0f0e0c;color:#efe9df;font:16px/1.5 system-ui">
+<div style="max-width:420px;padding:32px;text-align:center"><h1 style="font-size:22px;margin:0 0 8px">${title}</h1><p style="color:#9a8f7f;margin:0">${body}</p></div></body>`;
+}
+
+/**
+ * Open a one-shot callback server on the port OpenAI's client is registered for, and build the
+ * authorization URL. Only one attempt can run at a time because the port is fixed.
+ */
+export async function startBrowserLogin(): Promise<BrowserPending> {
+  if (activeServer) {
+    activeServer.close();
+    activeServer = null;
+  }
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const state = randomBytes(16).toString("hex");
+
+  const url = new URL(AUTHORIZE_URL);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", CLIENT_ID);
+  url.searchParams.set("redirect_uri", BROWSER_REDIRECT_URI);
+  url.searchParams.set("scope", "openid profile email offline_access");
+  url.searchParams.set("code_challenge", challenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("state", state);
+  url.searchParams.set("id_token_add_organizations", "true");
+  url.searchParams.set("codex_cli_simplified_flow", "true");
+  url.searchParams.set("originator", "pr-vantage");
+
+  let settle!: { resolve: (c: CodexCredential) => void; reject: (e: Error) => void };
+  const done = new Promise<CodexCredential>((resolve, reject) => (settle = { resolve, reject }));
+  done.catch(() => {}); // callers observe via poll; avoid an unhandled rejection if nobody is listening yet
+
+  const server = createServer(async (req, res) => {
+    const u = new URL(req.url ?? "/", `http://localhost:${CALLBACK_PORT}`);
+    if (u.pathname !== CALLBACK_PATH) {
+      res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" }).end(page("Not found", "This address only handles the sign-in callback."));
+      return;
+    }
+    if (u.searchParams.get("state") !== state) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(page("Sign-in mismatch", "This callback did not match the sign-in PR Vantage started. Try again from the Settings page."));
+      return;
+    }
+    const code = u.searchParams.get("code");
+    if (!code) {
+      res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(page("Sign-in cancelled", u.searchParams.get("error_description") ?? "OpenAI returned no authorization code."));
+      settle.reject(new Error(u.searchParams.get("error_description") ?? "OpenAI returned no authorization code."));
+      close();
+      return;
+    }
+    try {
+      const cred = await exchangeCode(code, verifier, BROWSER_REDIRECT_URI);
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(page("Signed in", `PR Vantage is connected${cred.email ? ` as ${cred.email}` : ""}. You can close this tab.`));
+      settle.resolve(cred);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" }).end(page("Sign-in failed", msg));
+      settle.reject(new Error(msg));
+    }
+    close();
+  });
+
+  const timer = setTimeout(() => {
+    settle.reject(new Error("Sign-in timed out. Start again from the Settings page."));
+    close();
+  }, BROWSER_TIMEOUT_MS);
+
+  function close() {
+    clearTimeout(timer);
+    if (activeServer === server) activeServer = null;
+    server.close();
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      reject(
+        new Error(
+          err.code === "EADDRINUSE"
+            ? `Port ${CALLBACK_PORT} is busy, probably another Codex sign-in or Codex CLI. Close it, or use the device code option.`
+            : `Could not open the sign-in callback: ${err.message}`,
+        ),
+      );
+    });
+    server.listen(CALLBACK_PORT, "127.0.0.1", () => resolve());
+  });
+  activeServer = server;
+
+  return {
+    url: url.toString(),
+    startedAt: Date.now(),
+    done,
+    cancel: () => {
+      settle.reject(new Error("Sign-in cancelled."));
+      close();
+    },
+  };
+}
+
+/* ---------------- Device-code flow ---------------- */
+
 /** Step 1: ask OpenAI for a user code. The person enters it at DEVICE_VERIFICATION_URL. */
 export async function startDeviceLogin(): Promise<DevicePending> {
   const res = await fetch(DEVICE_USER_CODE_URL, {
@@ -118,21 +253,7 @@ export async function pollDeviceLogin(p: DevicePending): Promise<CodexCredential
   }
   const json = (await res.json()) as { authorization_code?: string; code_verifier?: string };
   if (!json.authorization_code || !json.code_verifier) return null;
-
-  const tokenRes = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: CLIENT_ID,
-      code: json.authorization_code,
-      code_verifier: json.code_verifier,
-      redirect_uri: DEVICE_REDIRECT_URI,
-    }),
-  });
-  const cred = toCredential(await readToken(tokenRes, "exchange"));
-  await saveCredential(cred);
-  return cred;
+  return exchangeCode(json.authorization_code, json.code_verifier, DEVICE_REDIRECT_URI);
 }
 
 async function refresh(cred: CodexCredential): Promise<CodexCredential> {
