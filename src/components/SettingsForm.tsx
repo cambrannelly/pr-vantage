@@ -34,8 +34,18 @@ export function SettingsForm({ initial, providers }: {
   const [busy, setBusy] = useState<"verify" | "save" | null>(null);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
+  /** What is on disk right now, to tell "in use" from "not yet applied". */
+  const [saved, setSaved] = useState({ provider: initial.provider, model: initial.model, effort: initial.effort, openaiAuth: initial.openaiAuth });
+
   const meta = providers[provider];
   const viaChatGPT = provider === "openai" && openaiAuth === "chatgpt";
+  const pendingKey = !!draftKey[provider]?.trim();
+  const dirty =
+    pendingKey ||
+    saved.provider !== provider ||
+    saved.model !== model ||
+    saved.effort !== effort ||
+    (provider === "openai" && saved.openaiAuth !== openaiAuth);
   /** Whether the selected provider is ready to be used: a key on file, a key typed, or a ChatGPT login. */
   const credentialed = viaChatGPT ? codex.signedIn : keys[provider].set || !!draftKey[provider]?.trim();
   const draft = draftKey[provider] ?? "";
@@ -73,7 +83,8 @@ export function SettingsForm({ initial, providers }: {
     if (!res.ok) return setNote({ ok: false, text: json.error ?? "Could not save." });
     setKeys(json.keys);
     setDraftKey({});
-    setNote({ ok: true, text: `Saved. Summaries now use ${json.model}${viaChatGPT ? " through your ChatGPT plan" : ""}.` });
+    setSaved({ provider: json.provider, model: json.model, effort: json.effort, openaiAuth: json.openaiAuth });
+    setNote({ ok: true, text: `Summaries now use ${json.model}${viaChatGPT ? " through your ChatGPT plan" : ""}.` });
     router.refresh();
   }
 
@@ -218,18 +229,29 @@ export function SettingsForm({ initial, providers }: {
         <p className="mt-2 text-[12px] text-muted">Maps to each provider&apos;s reasoning setting. Lower effort cuts the wait on big PRs noticeably.</p>
       </section>
 
-      {/* ---------- Save ---------- */}
+      {/* ---------- Apply ---------- */}
       <section className="reveal flex flex-wrap items-center gap-4" style={{ animationDelay: "160ms" }}>
-        <button className="btn btn-primary" onClick={save} disabled={busy !== null || !model || !credentialed}>
-          {busy === "save" ? "Saving…" : "Save"}
-        </button>
+        {dirty || !credentialed ? (
+          <button className="btn btn-primary" onClick={save} disabled={busy !== null || !model || !credentialed}>
+            {busy === "save" ? "Applying…" : pendingKey && !dirtyExceptKey(saved, { provider, model, effort, openaiAuth }) ? "Save key" : `Use ${model}`}
+          </button>
+        ) : (
+          <span className="btn cursor-default !border-moss/40 text-moss">✓ {model} is in use</span>
+        )}
         {note && <span className={`text-[13px] ${note.ok ? "text-moss" : "text-rust"}`}>{note.text}</span>}
         {!credentialed && (
-          <span className="text-[13px] text-muted">{viaChatGPT ? "Sign in to ChatGPT to save." : `Add a key for ${meta.label} to save.`}</span>
+          <span className="text-[13px] text-muted">{viaChatGPT ? "Sign in to ChatGPT first." : `Add a key for ${meta.label} first.`}</span>
         )}
       </section>
     </div>
   );
+}
+
+type Choice = { provider: Provider; model: string; effort: Effort; openaiAuth: OpenAIAuth };
+
+/** True when something other than a typed key differs from what is saved. */
+function dirtyExceptKey(saved: Choice, now: Choice): boolean {
+  return saved.provider !== now.provider || saved.model !== now.model || saved.effort !== now.effort || (now.provider === "openai" && saved.openaiAuth !== now.openaiAuth);
 }
 
 function ModelRow({ id, note, on, onPick }: { id: string; note: string; on: boolean; onPick: () => void }) {

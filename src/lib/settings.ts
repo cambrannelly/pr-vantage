@@ -61,16 +61,28 @@ export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | 
 };
 
 const FILE = path.join(process.cwd(), "data", "settings.json");
-let cached: Settings | null = null;
+/**
+ * Cache keyed on the file's mtime rather than "read once": Next's dev server gives pages and
+ * route handlers separate module instances, so a write from one must be visible to the other.
+ */
+let cached: { at: number; value: Settings } | null = null;
 
 export async function readSettings(): Promise<Settings> {
-  if (cached) return cached;
+  let mtime: number;
   try {
-    cached = JSON.parse(await fs.readFile(FILE, "utf8")) as Settings;
+    mtime = (await fs.stat(FILE)).mtimeMs;
   } catch {
-    cached = await importFromEnv();
+    cached = null;
+    return importFromEnv();
   }
-  return cached;
+  if (cached && cached.at === mtime) return cached.value;
+  try {
+    const value = JSON.parse(await fs.readFile(FILE, "utf8")) as Settings;
+    cached = { at: mtime, value };
+    return value;
+  } catch {
+    return cached?.value ?? {};
+  }
 }
 
 /**
@@ -99,7 +111,7 @@ async function importFromEnv(): Promise<Settings> {
 export async function writeSettings(next: Settings): Promise<Settings> {
   await fs.mkdir(path.dirname(FILE), { recursive: true });
   await fs.writeFile(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  cached = next;
+  cached = { at: (await fs.stat(FILE)).mtimeMs, value: next };
   return next;
 }
 
