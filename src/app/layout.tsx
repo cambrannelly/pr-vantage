@@ -27,7 +27,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang="en" className={`${fraunces.variable} ${instrument.variable} ${jetbrains.variable} h-full`}>
       <body className="min-h-full">
         <div className="relative z-10 flex min-h-screen">
-          <Sidebar repos={repos} accounts={accounts} active={active?.login ?? null} />
+          {/* Keyed by account so the sidebar's local repo state resets on a switch instead of keeping the old list. */}
+          <Sidebar key={active?.login ?? "none"} repos={repos} accounts={accounts} active={active?.login ?? null} />
           <main className="min-w-0 flex-1">{children}</main>
         </div>
       </body>
