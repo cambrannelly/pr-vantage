@@ -85,7 +85,22 @@ export function MergePanel({ owner, repo, number, headSha }: { owner: string; re
             <p className="mt-3 text-[13px] text-amber">New commits were pushed since this page loaded. Reload before merging.</p>
           )}
           {!headMoved && note && (
-            <p className={`mt-3 text-[13px] ${warn ? "text-rust" : "text-muted"}`}>{note}</p>
+            <p className={`mt-3 text-[13px] ${warn ? "text-rust" : "text-muted"}`}>
+              {note}
+              {warn && (
+                <>
+                  {" "}
+                  <a
+                    href={`https://github.com/${owner}/${repo}/pull/${number}#partial-pull-merging`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mono whitespace-nowrap text-[11px] text-muted underline decoration-line-2 underline-offset-[3px] hover:text-amber hover:decoration-amber"
+                  >
+                    see what is blocking ↗
+                  </a>
+                </>
+              )}
+            </p>
           )}
           {info.allowed.length === 0 && (
             <p className="mt-3 text-[13px] text-muted">This repository allows no merge strategy through the API.</p>
