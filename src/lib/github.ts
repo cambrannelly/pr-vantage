@@ -23,58 +23,85 @@ export type PullSummaryRow = {
   baseRef: string;
   headSha: string;
   labels: string[];
-  reviewDecision: string | null;
-  additions: number;
-  deletions: number;
-  changedFiles: number;
   url: string;
 };
 
+/** Per-PR numbers GitHub computes on demand. Fetched separately because they make the list query 4-5x slower. */
+export type PullStats = {
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  reviewDecision: string | null;
+};
+
+const LIST_TTL_MS = 20_000;
+const listCache = new Map<string, { at: number; value: Promise<unknown> }>();
+
+/** Short-lived memo so sidebar back-and-forth does not re-query GitHub every time. */
+function memo<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const hit = listCache.get(key);
+  if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.value as Promise<T>;
+  const value = fn();
+  listCache.set(key, { at: Date.now(), value });
+  value.catch(() => listCache.delete(key));
+  return value;
+}
+
 export async function listOpenPulls(owner: string, repo: string, login?: string): Promise<PullSummaryRow[]> {
   const octokit = await gh(login);
-  // GraphQL gives us review decision + line stats in one round trip.
-  const query = `
-    query($owner: String!, $repo: String!) {
-      repository(owner: $owner, name: $repo) {
-        pullRequests(states: OPEN, first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
-          nodes {
-            number title createdAt updatedAt isDraft url
-            headRefName baseRefName headRefOid
-            additions deletions changedFiles
-            reviewDecision
-            author { login avatarUrl }
-            labels(first: 10) { nodes { name } }
+  return memo(`pulls:${login ?? "-"}:${owner}/${repo}`, async () => {
+    const query = `
+      query($owner: String!, $repo: String!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequests(states: OPEN, first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
+            nodes {
+              number title createdAt updatedAt isDraft url
+              headRefName baseRefName headRefOid
+              author { login avatarUrl }
+              labels(first: 10) { nodes { name } }
+            }
           }
         }
-      }
-    }`;
-  type Node = {
-    number: number; title: string; createdAt: string; updatedAt: string; isDraft: boolean; url: string;
-    headRefName: string; baseRefName: string; headRefOid: string;
-    additions: number; deletions: number; changedFiles: number;
-    reviewDecision: string | null;
-    author: { login: string; avatarUrl: string } | null;
-    labels: { nodes: { name: string }[] };
-  };
-  const res = await octokit.graphql<{ repository: { pullRequests: { nodes: Node[] } } }>(query, { owner, repo });
-  return res.repository.pullRequests.nodes.map((n) => ({
-    number: n.number,
-    title: n.title,
-    author: n.author?.login ?? "ghost",
-    authorAvatar: n.author?.avatarUrl ?? "",
-    createdAt: n.createdAt,
-    updatedAt: n.updatedAt,
-    draft: n.isDraft,
-    headRef: n.headRefName,
-    baseRef: n.baseRefName,
-    headSha: n.headRefOid,
-    labels: n.labels.nodes.map((l) => l.name),
-    reviewDecision: n.reviewDecision,
-    additions: n.additions,
-    deletions: n.deletions,
-    changedFiles: n.changedFiles,
-    url: n.url,
-  }));
+      }`;
+    type Node = {
+      number: number; title: string; createdAt: string; updatedAt: string; isDraft: boolean; url: string;
+      headRefName: string; baseRefName: string; headRefOid: string;
+      author: { login: string; avatarUrl: string } | null;
+      labels: { nodes: { name: string }[] };
+    };
+    const res = await octokit.graphql<{ repository: { pullRequests: { nodes: Node[] } } }>(query, { owner, repo });
+    return res.repository.pullRequests.nodes.map((n) => ({
+      number: n.number,
+      title: n.title,
+      author: n.author?.login ?? "ghost",
+      authorAvatar: n.author?.avatarUrl ?? "",
+      createdAt: n.createdAt,
+      updatedAt: n.updatedAt,
+      draft: n.isDraft,
+      headRef: n.headRefName,
+      baseRef: n.baseRefName,
+      headSha: n.headRefOid,
+      labels: n.labels.nodes.map((l) => l.name),
+      url: n.url,
+    }));
+  });
+}
+
+export async function listPullStats(owner: string, repo: string, login?: string): Promise<Map<number, PullStats>> {
+  const octokit = await gh(login);
+  return memo(`stats:${login ?? "-"}:${owner}/${repo}`, async () => {
+    const query = `
+      query($owner: String!, $repo: String!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequests(states: OPEN, first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
+            nodes { number additions deletions changedFiles reviewDecision }
+          }
+        }
+      }`;
+    type Node = { number: number; additions: number; deletions: number; changedFiles: number; reviewDecision: string | null };
+    const res = await octokit.graphql<{ repository: { pullRequests: { nodes: Node[] } } }>(query, { owner, repo });
+    return new Map(res.repository.pullRequests.nodes.map((n) => [n.number, { additions: n.additions, deletions: n.deletions, changedFiles: n.changedFiles, reviewDecision: n.reviewDecision }]));
+  });
 }
 
 export type ChangedFile = {

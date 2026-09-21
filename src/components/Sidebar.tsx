@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { RepoRef } from "@/lib/repos";
@@ -74,7 +74,10 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
                 className={`block rounded-lg px-3 py-2 transition ${active ? "bg-bg-4 text-ink" : "text-ink-2 hover:bg-bg-3"}`}
               >
                 <div className="mono text-[11px] text-muted">{r.owner}/</div>
-                <div className="truncate text-[14px] font-medium">{r.repo}</div>
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[14px] font-medium">{r.repo}</span>
+                  <PendingDot />
+                </div>
                 {active && <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded bg-amber" />}
               </Link>
               <button
@@ -134,6 +137,13 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
       </div>
     </aside>
   );
+}
+
+/** Pulses while the clicked repo's page is still loading, so a click on the already-active repo visibly does something. */
+function PendingDot() {
+  const { pending } = useLinkStatus();
+  if (!pending) return null;
+  return <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber" />;
 }
 
 function AccountRow({ account }: { account: Account }) {
