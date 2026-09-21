@@ -10,10 +10,7 @@ import { keyFor, PROVIDER_META, PROVIDERS, readSettings, type Effort, type Provi
  * through the OpenAI SDK with a base URL. Auth is always an API key: consumer subscriptions
  * (Claude Max, ChatGPT Plus) are not licensed for third-party tools.
  *
- * Configured on the /settings page (data/settings.json). The environment is the fallback:
- *   PR_VANTAGE_PROVIDER, PR_VANTAGE_MODEL, PR_VANTAGE_EFFORT,
- *   ANTHROPIC_API_KEY, OPENAI_API_KEY, KIMI_API_KEY (or MOONSHOT_API_KEY),
- *   PR_VANTAGE_LLM_BASE_URL + PR_VANTAGE_LLM_API_KEY for a custom endpoint.
+ * Configured on the /settings page, stored in data/settings.json.
  */
 
 export type { Provider, Effort } from "./settings";
@@ -24,32 +21,19 @@ export type LlmConfig = {
   effort: Effort;
   apiKey: string | null;
   baseUrl: string | null;
-  /** Env var to set when apiKey is missing. */
-  keyVar: string;
-  /** Where the key came from, for the settings UI. */
-  keySource: "settings" | "env" | null;
 };
 
-/** Effective configuration: settings.json first, environment second. */
+/** Effective configuration from the settings store. */
 export async function llmConfig(): Promise<LlmConfig> {
   const s = await readSettings();
-  const explicit = (s.provider ?? process.env.PR_VANTAGE_PROVIDER?.trim().toLowerCase()) as Provider | undefined;
-  const provider: Provider =
-    explicit && PROVIDERS.includes(explicit)
-      ? explicit
-      : (PROVIDERS.find((p) => keyFor(s, p).value) ?? "anthropic");
-  const effortRaw = s.effort ?? process.env.PR_VANTAGE_EFFORT?.trim().toLowerCase();
-  const effort: Effort = effortRaw === "low" || effortRaw === "high" ? effortRaw : "medium";
-  const key = keyFor(s, provider);
+  const provider: Provider = s.provider && PROVIDERS.includes(s.provider) ? s.provider : (PROVIDERS.find((p) => keyFor(s, p)) ?? "anthropic");
   const meta = PROVIDER_META[provider];
   return {
     provider,
-    model: s.model?.trim() || process.env.PR_VANTAGE_MODEL?.trim() || meta.defaultModel,
-    effort,
-    apiKey: key.value,
-    baseUrl: provider === "custom" ? s.customBaseUrl?.trim() || process.env.PR_VANTAGE_LLM_BASE_URL?.trim() || null : meta.baseUrl,
-    keyVar: meta.keyVar,
-    keySource: key.source,
+    model: s.model?.trim() || meta.defaultModel,
+    effort: s.effort ?? "medium",
+    apiKey: keyFor(s, provider),
+    baseUrl: provider === "custom" ? s.customBaseUrl?.trim() || null : meta.baseUrl,
   };
 }
 
@@ -83,7 +67,7 @@ export type StructuredRequest<T> = {
 export async function generateStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
   const cfg = await llmConfig();
   if (!cfg.apiKey) {
-    throw new LlmError(`No ${cfg.provider} API key. Add one on the Settings page (or set ${cfg.keyVar} in .env.local).`, "config", 401);
+    throw new LlmError(`No ${PROVIDER_META[cfg.provider].label} API key. Add one on the Settings page.`, "config", 401);
   }
   if (cfg.provider === "custom" && !cfg.baseUrl) {
     throw new LlmError("The custom provider needs a base URL (an OpenAI-compatible /v1 endpoint). Set it on the Settings page.", "config", 500);
@@ -126,12 +110,9 @@ async function viaAnthropic<T>(req: StructuredRequest<T>, cfg: LlmConfig): Promi
 }
 
 function mapAnthropicError(err: unknown): Error {
-  if (err instanceof Anthropic.AuthenticationError) return new LlmError("Anthropic rejected the API key. Check ANTHROPIC_API_KEY.", "auth", 401);
+  if (err instanceof Anthropic.AuthenticationError) return new LlmError("Anthropic rejected the API key. Check it on the Settings page.", "auth", 401);
   if (err instanceof Anthropic.RateLimitError) return new LlmError("Anthropic rate limit hit. Try again shortly.", "rate", 429);
   if (err instanceof Anthropic.APIError) return new LlmError(`Anthropic API error ${err.status}: ${err.message}`, "api", 502);
-  if (err instanceof Error && /Could not resolve authentication/.test(err.message)) {
-    return new LlmError("No Anthropic API key. Set ANTHROPIC_API_KEY in .env.local and restart `pnpm dev`.", "config", 401);
-  }
   return err instanceof Error ? err : new Error(String(err));
 }
 
@@ -216,7 +197,7 @@ async function viaOpenAICompatible<T>(req: StructuredRequest<T>, cfg: LlmConfig)
 
 function mapOpenAIError(err: unknown, cfg: LlmConfig): Error {
   const label = cfg.provider === "custom" ? "LLM endpoint" : cfg.provider === "kimi" ? "Kimi" : "OpenAI";
-  if (err instanceof OpenAI.AuthenticationError) return new LlmError(`${label} rejected the API key. Check ${cfg.keyVar}.`, "auth", 401);
+  if (err instanceof OpenAI.AuthenticationError) return new LlmError(`${label} rejected the API key. Check it on the Settings page.`, "auth", 401);
   if (err instanceof OpenAI.RateLimitError) return new LlmError(`${label} rate limit hit. Try again shortly.`, "rate", 429);
   if (err instanceof OpenAI.APIError) return new LlmError(`${label} API error ${err.status}: ${err.message}`, "api", 502);
   return err instanceof Error ? err : new Error(String(err));
@@ -239,6 +220,6 @@ export async function listModels(provider: Provider, apiKey: string, baseUrl: st
     const chatty = provider === "openai" ? ids.filter((id) => /^(gpt|o\d|chatgpt)/.test(id) && !/(embedding|tts|whisper|realtime|audio|image|transcribe|moderation|search)/.test(id)) : ids;
     return chatty.sort();
   } catch (err) {
-    throw provider === "anthropic" ? mapAnthropicError(err) : mapOpenAIError(err, { provider, keyVar: PROVIDER_META[provider].keyVar } as LlmConfig);
+    throw provider === "anthropic" ? mapAnthropicError(err) : mapOpenAIError(err, { provider } as LlmConfig);
   }
 }

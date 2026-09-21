@@ -2,8 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 /**
- * Model settings live in data/settings.json on this machine (gitignored, like .env.local).
- * Anything unset here falls back to the environment, so an env-only setup keeps working.
+ * Model settings live in data/settings.json on this machine (gitignored, owner-only). The
+ * Settings page is the only way to change them; the environment is read once, on first run,
+ * to import a key from an older setup.
  */
 
 export type Provider = "anthropic" | "openai" | "kimi" | "custom";
@@ -18,10 +19,9 @@ export type Settings = {
   customBaseUrl?: string;
 };
 
-export const PROVIDER_META: Record<Provider, { label: string; keyVar: string; baseUrl: string | null; console: string | null; defaultModel: string; suggested: { id: string; note: string }[] }> = {
+export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | null; console: string | null; defaultModel: string; suggested: { id: string; note: string }[] }> = {
   anthropic: {
     label: "Anthropic",
-    keyVar: "ANTHROPIC_API_KEY",
     baseUrl: null,
     console: "https://console.anthropic.com/settings/keys",
     defaultModel: "claude-sonnet-5",
@@ -33,7 +33,6 @@ export const PROVIDER_META: Record<Provider, { label: string; keyVar: string; ba
   },
   openai: {
     label: "OpenAI",
-    keyVar: "OPENAI_API_KEY",
     baseUrl: null,
     console: "https://platform.openai.com/api-keys",
     defaultModel: "gpt-5.6-terra",
@@ -45,7 +44,6 @@ export const PROVIDER_META: Record<Provider, { label: string; keyVar: string; ba
   },
   kimi: {
     label: "Kimi (Moonshot)",
-    keyVar: "KIMI_API_KEY",
     baseUrl: "https://api.moonshot.ai/v1",
     console: "https://platform.kimi.ai/console/api-keys",
     defaultModel: "kimi-k2.6",
@@ -57,7 +55,6 @@ export const PROVIDER_META: Record<Provider, { label: string; keyVar: string; ba
   },
   custom: {
     label: "OpenAI-compatible endpoint",
-    keyVar: "PR_VANTAGE_LLM_API_KEY",
     baseUrl: null,
     console: null,
     defaultModel: "",
@@ -73,9 +70,34 @@ export async function readSettings(): Promise<Settings> {
   try {
     cached = JSON.parse(await fs.readFile(FILE, "utf8")) as Settings;
   } catch {
-    cached = {};
+    cached = await importFromEnv();
   }
   return cached;
+}
+
+/**
+ * First run only: if no settings file exists but the environment carries a model key from an
+ * older setup, copy it in so nothing breaks. After this, the environment is not consulted.
+ */
+async function importFromEnv(): Promise<Settings> {
+  const env = (n: string) => process.env[n]?.trim() || undefined;
+  const keys: Partial<Record<Provider, string>> = {};
+  if (env("ANTHROPIC_API_KEY")) keys.anthropic = env("ANTHROPIC_API_KEY");
+  if (env("OPENAI_API_KEY")) keys.openai = env("OPENAI_API_KEY");
+  if (env("KIMI_API_KEY") ?? env("MOONSHOT_API_KEY")) keys.kimi = env("KIMI_API_KEY") ?? env("MOONSHOT_API_KEY");
+  if (env("PR_VANTAGE_LLM_API_KEY")) keys.custom = env("PR_VANTAGE_LLM_API_KEY");
+  if (Object.keys(keys).length === 0) return {};
+  const provider = (PROVIDERS.find((p) => p === env("PR_VANTAGE_PROVIDER")?.toLowerCase()) ?? PROVIDERS.find((p) => keys[p]))!;
+  const imported: Settings = {
+    provider,
+    model: env("PR_VANTAGE_MODEL"),
+    effort: (["low", "medium", "high"] as Effort[]).find((e) => e === env("PR_VANTAGE_EFFORT")?.toLowerCase()),
+    customBaseUrl: env("PR_VANTAGE_LLM_BASE_URL"),
+    keys,
+  };
+  await writeSettings(imported);
+  console.log(`[settings] imported ${Object.keys(keys).join(", ")} key(s) from the environment into data/settings.json`);
+  return imported;
 }
 
 export async function writeSettings(next: Settings): Promise<Settings> {
@@ -108,17 +130,9 @@ export async function updateSettings(patch: {
   });
 }
 
-function env(name: string): string | null {
-  const v = process.env[name]?.trim();
-  return v ? v : null;
-}
-
-/** The key for a provider: saved in settings first, then the environment. */
-export function keyFor(s: Settings, p: Provider): { value: string | null; source: "settings" | "env" | null } {
-  const saved = s.keys?.[p];
-  if (saved) return { value: saved, source: "settings" };
-  const fromEnv = p === "kimi" ? env("KIMI_API_KEY") ?? env("MOONSHOT_API_KEY") : env(PROVIDER_META[p].keyVar);
-  return fromEnv ? { value: fromEnv, source: "env" } : { value: null, source: null };
+/** The saved key for a provider, if any. */
+export function keyFor(s: Settings, p: Provider): string | null {
+  return s.keys?.[p] ?? null;
 }
 
 /** Last four characters, for showing that a key exists without revealing it. */

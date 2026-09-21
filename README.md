@@ -7,7 +7,7 @@ actually deserve your eyes. Approve, comment, or request changes without leaving
 ## Run it
 
 ```bash
-cp .env.local.example .env.local   # optional; the Settings page in the app takes the model API key
+cp .env.local.example .env.local   # optional; model keys are entered on the Settings page in the app
 pnpm install
 pnpm dev
 ```
@@ -48,9 +48,10 @@ base branch, it is fed to the model as the team's conventions and the PR is judg
 - `src/lib/llm.ts` is the only place a model is called. Anthropic is native; OpenAI, Kimi, and any
   OpenAI-compatible endpoint go through the OpenAI SDK with a base URL. Every pass asks for JSON
   matching a zod schema and validates it, so providers are interchangeable.
-- The Settings page (`/settings`) holds the provider, API key, model, and effort in
-  `data/settings.json` (owner-only, gitignored). It can list the models a key can use. Defaults are
-  the mid-tier model of each provider; env vars are the fallback for anything not set there.
+- The Settings page (`/settings`) is the only place model configuration lives: provider, API key,
+  model, and effort, stored in `data/settings.json` (owner-only, gitignored). It can list the models a
+  key can use. Defaults are the mid-tier model of each provider. On first run, a model key found in
+  the environment is imported once so older setups keep working.
 - `src/lib/summarize.ts` builds one prompt from the PR (patches plus full head contents of changed
   files) and streams a structured summary from the model. The model refers to files by index so it
   does not spend output tokens repeating long paths; `resolveSummary` maps them back. Snapshots are

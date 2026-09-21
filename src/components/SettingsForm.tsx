@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Effort, Provider, PROVIDER_META } from "@/lib/settings";
 
-type KeyState = { set: boolean; hint: string | null; source: "settings" | "env" | null };
+type KeyState = { set: boolean; hint: string | null };
 type Meta = typeof PROVIDER_META;
 
 const ORDER: Provider[] = ["anthropic", "openai", "kimi", "custom"];
@@ -107,7 +107,7 @@ export function SettingsForm({ initial, providers }: {
                   <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${k.set ? "bg-moss" : "bg-faint"}`} />
                 </div>
                 <div className="mono mt-1 text-[11px] text-muted">
-                  {k.set ? `key ${k.hint} · ${k.source === "env" ? "from .env.local" : "saved"}` : "no key yet"}
+                  {k.set ? `key saved ${k.hint}` : "no key yet"}
                 </div>
               </button>
             );
@@ -132,7 +132,7 @@ export function SettingsForm({ initial, providers }: {
           )}
           <div>
             <label className="mono mb-1 block text-[11px] text-muted">
-              {key.set ? `Replace the ${key.source === "env" ? "env" : "saved"} key ${key.hint}` : "Paste your API key"}
+              {key.set ? `Replace the saved key ${key.hint}` : "Paste your API key"}
             </label>
             <div className="flex gap-2">
               <input
@@ -150,7 +150,7 @@ export function SettingsForm({ initial, providers }: {
           </div>
           <div className="flex items-center justify-between gap-4 text-[12px] text-muted">
             <span>Keys are stored with owner-only permissions in <span className="mono">data/</span>, which is gitignored.</span>
-            {key.set && key.source === "settings" && (
+            {key.set && (
               <button className="mono shrink-0 text-[11px] text-faint hover:text-rust" onClick={() => clearKey(provider)}>remove saved key</button>
             )}
           </div>

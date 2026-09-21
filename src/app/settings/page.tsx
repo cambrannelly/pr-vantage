@@ -10,9 +10,9 @@ export default async function SettingsPage() {
   const keys = Object.fromEntries(
     PROVIDERS.map((p) => {
       const k = keyFor(s, p);
-      return [p, k.value ? { set: true as const, hint: keyHint(k.value), source: k.source } : { set: false as const, hint: null, source: null }];
+      return [p, k ? { set: true as const, hint: keyHint(k) } : { set: false as const, hint: null }];
     }),
-  ) as Record<(typeof PROVIDERS)[number], { set: boolean; hint: string | null; source: "settings" | "env" | null }>;
+  ) as Record<(typeof PROVIDERS)[number], { set: boolean; hint: string | null }>;
 
   return (
     <div className="mx-auto max-w-3xl px-10 py-10">
@@ -21,13 +21,12 @@ export default async function SettingsPage() {
         <h1 className="display mt-1 text-[38px] leading-none">Model</h1>
         <p className="mt-3 max-w-xl text-muted">
           Which model reads your pull requests, and the key that pays for it. Saved to{" "}
-          <span className="mono text-ink-2">data/settings.json</span> on this machine only. Anything you leave blank falls
-          back to <span className="mono text-ink-2">.env.local</span>.
+          <span className="mono text-ink-2">data/settings.json</span> on this machine only, never committed.
         </p>
       </header>
       <div className="hairline my-8" />
       <SettingsForm
-        initial={{ provider: cfg.provider, model: cfg.model, effort: cfg.effort, customBaseUrl: cfg.provider === "custom" ? cfg.baseUrl : s.customBaseUrl ?? null, keys }}
+        initial={{ provider: cfg.provider, model: cfg.model, effort: cfg.effort, customBaseUrl: s.customBaseUrl ?? null, keys }}
         providers={PROVIDER_META}
       />
     </div>

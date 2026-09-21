@@ -10,11 +10,11 @@ async function view() {
     provider: cfg.provider,
     model: cfg.model,
     effort: cfg.effort,
-    customBaseUrl: cfg.provider === "custom" ? cfg.baseUrl : s.customBaseUrl ?? process.env.PR_VANTAGE_LLM_BASE_URL ?? null,
+    customBaseUrl: s.customBaseUrl ?? null,
     keys: Object.fromEntries(
       PROVIDERS.map((p) => {
         const k = keyFor(s, p);
-        return [p, k.value ? { set: true, hint: keyHint(k.value), source: k.source } : { set: false, hint: null, source: null }];
+        return [p, k ? { set: true, hint: keyHint(k) } : { set: false, hint: null }];
       }),
     ),
     providers: PROVIDER_META,
