@@ -20,7 +20,7 @@ export function ReviewPanel({ owner, repo, number, reviews, verdictHint }: {
   const [busy, setBusy] = useState<ReviewEvent | null>(null);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [posted, setPosted] = useState<Existing[]>(reviews);
-  const [showExisting, setShowExisting] = useState(false);
+  const [showExisting, setShowExisting] = useState(true);
 
   async function submit(event: ReviewEvent) {
     setBusy(event);
@@ -70,12 +70,23 @@ export function ReviewPanel({ owner, repo, number, reviews, verdictHint }: {
 
       {posted.length > 0 && (
         <div className="mt-5 border-t border-line pt-4">
-          <button className="flex w-full items-center justify-between text-left" onClick={() => setShowExisting((v) => !v)}>
-            <span className="eyebrow">Existing reviews</span>
-            <span className="mono text-[11px] text-muted">
-              {summarize(posted)} · {showExisting ? "hide" : "show"}
-            </span>
-          </button>
+          <div className="flex items-center justify-between gap-3">
+            <button className="flex min-w-0 items-center gap-3 text-left" onClick={() => setShowExisting((v) => !v)}>
+              <span className="eyebrow">Existing reviews</span>
+              <span className="mono text-[11px] text-muted">
+                {summarize(posted)} · {showExisting ? "hide" : "show"}
+              </span>
+            </button>
+            <a
+              href={`https://github.com/${owner}/${repo}/pull/${number}/files`}
+              target="_blank"
+              rel="noreferrer"
+              title="Open the files-changed tab on GitHub, where reviewers' line comments live"
+              className="mono shrink-0 text-[11px] text-muted hover:text-amber"
+            >
+              comments on github ↗
+            </a>
+          </div>
           {showExisting && (
           <ul className="mt-2 divide-y divide-line">
             {posted.map((r, i) => (
@@ -83,11 +94,6 @@ export function ReviewPanel({ owner, repo, number, reviews, verdictHint }: {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="min-w-0 truncate font-medium">{r.author}</span>
                   <span className={`tag ${STATE_CLS[r.state] ?? ""}`}>{r.state.toLowerCase().replace("_", " ")}</span>
-                  {r.url && (
-                    <a href={r.url} target="_blank" rel="noreferrer" title="Open this review and its line comments on GitHub" className="mono ml-auto text-[11px] text-muted hover:text-amber">
-                      on github ↗
-                    </a>
-                  )}
                 </div>
                 {r.body && (
                   <details className="mt-1 group">
