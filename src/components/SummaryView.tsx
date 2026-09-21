@@ -6,7 +6,6 @@ import type { ChangedFile } from "@/lib/github";
 import { ArchMap } from "./ArchMap";
 import { DiffView } from "./DiffView";
 import { ReviewPanel } from "./ReviewPanel";
-import { AskPanel } from "./AskPanel";
 import { ChecksPanel } from "./ChecksPanel";
 import { MergePanel } from "./MergePanel";
 import { Rich } from "./Rich";
@@ -406,7 +405,6 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
         <ReviewPanel owner={owner} repo={repo} number={number} reviews={reviews} verdictHint={verdict ?? undefined} />
         <ChecksPanel owner={owner} repo={repo} sha={headSha} />
         <MergePanel owner={owner} repo={repo} number={number} headSha={headSha} />
-        <AskPanel owner={owner} repo={repo} number={number} disabled={!summary || streaming} />
       </aside>
     </div>
   );

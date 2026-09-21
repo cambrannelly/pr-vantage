@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getPullDetail } from "@/lib/github";
 import { SummaryView } from "@/components/SummaryView";
+import { CopyButton } from "@/components/CopyButton";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,8 @@ export default async function PullPage({ params }: { params: Promise<{ owner: st
           <span className="text-faint">·</span>
           <span className="mono"><span className="text-moss">+{pr.additions}</span> <span className="text-rust">−{pr.deletions}</span> in {pr.files.length} files</span>
           {pr.mergeable === false && <span className="tag tag-rust">conflicts</span>}
+          <span className="text-faint">·</span>
+          <CopyButton text={pr.url} label="copy pr url" />
         </div>
       </header>
 

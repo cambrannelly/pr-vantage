@@ -25,7 +25,6 @@ Open http://localhost:4747 and add a repo in the sidebar as `owner/repo` or a Gi
 4. Components, risks judged against architectural rules (new dependencies, bypassed layers, contract
    changes, auth boundaries, duplicated logic), and questions to ask the author.
 5. Files sorted by how much attention they deserve, with the raw diff behind a toggle.
-6. Ask questions about the change. Answers come from the full PR context plus the summary, with prompt
    caching so follow-ups are cheap.
 7. Approve, comment, or request changes without leaving the page. Nothing is posted to the PR unless
    you do it.
