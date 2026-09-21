@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { listOpenPulls } from "@/lib/github";
+import { readCachedSummary } from "@/lib/summarize";
+import { PrewarmBadge } from "@/components/PrewarmBadge";
 
 export const dynamic = "force-dynamic";
 
@@ -25,14 +27,20 @@ export default async function RepoPage({ params }: { params: Promise<{ owner: st
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
+  const ready = new Set(
+    (await Promise.all(pulls.map(async (pr) => ((await readCachedSummary(owner, repo, pr.number, pr.headSha)) ? pr.number : null))))
+      .filter((n): n is number => n !== null),
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-10 py-10">
       <header className="reveal">
         <div className="eyebrow">{owner}</div>
         <h1 className="display mt-1 text-[38px] leading-none">{repo}</h1>
-        <p className="mt-3 text-muted">
-          {pulls.length} open pull request{pulls.length === 1 ? "" : "s"}
+        <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-muted">
+          <span>{pulls.length} open pull request{pulls.length === 1 ? "" : "s"}</span>
+          {pulls.length > 0 && <span className="mono text-[12px]">{ready.size} of {pulls.length} summaries ready</span>}
+          <PrewarmBadge owner={owner} repo={repo} />
         </p>
       </header>
 
@@ -56,6 +64,7 @@ export default async function RepoPage({ params }: { params: Promise<{ owner: st
                   <div className="flex items-center gap-3">
                     <span className="mono text-muted">#{pr.number}</span>
                     {pr.draft && <span className="tag">draft</span>}
+                    {ready.has(pr.number) && <span className="tag tag-moss" title="Summary is generated for the current head">ready</span>}
                     {d && <span className={`tag ${d.cls}`}>{d.label}</span>}
                     {pr.labels.slice(0, 3).map((l) => (
                       <span key={l} className="tag">{l}</span>

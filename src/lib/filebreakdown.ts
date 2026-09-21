@@ -53,7 +53,7 @@ export async function readCachedBreakdown(owner: string, repo: string, number: n
 async function headContent(pr: PullDetail, file: ChangedFile): Promise<string | null> {
   if (file.status === "removed") return null;
   try {
-    const { data } = await gh().rest.repos.getContent({ owner: pr.headRepo.owner, repo: pr.headRepo.repo, path: file.path, ref: pr.headSha });
+    const { data } = await (await gh()).rest.repos.getContent({ owner: pr.headRepo.owner, repo: pr.headRepo.repo, path: file.path, ref: pr.headSha });
     if (!Array.isArray(data) && "content" in data && data.content) {
       const text = Buffer.from(data.content, "base64").toString("utf8");
       return text.length <= 40_000 ? text : null;

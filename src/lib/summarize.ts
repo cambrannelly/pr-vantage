@@ -102,11 +102,23 @@ export function buildPrompt(pr: PullDetail, guidance: { path: string; text: stri
   return parts.join("\n\n");
 }
 
-export async function generateSummary(owner: string, repo: string, pr: PullDetail): Promise<Summary> {
+/** One generation per PR head at a time, so a page load and the pre-warm job never pay twice for the same SHA. */
+const inFlight = new Map<string, Promise<Summary>>();
+
+export async function generateSummary(owner: string, repo: string, pr: PullDetail, login?: string): Promise<Summary> {
   const cached = await readCachedSummary(owner, repo, pr.number, pr.headSha);
   if (cached) return cached;
 
-  const guidance = await getRepoGuidance(owner, repo, pr.baseRef);
+  const key = `${owner}/${repo}#${pr.number}@${pr.headSha}`;
+  const pending = inFlight.get(key);
+  if (pending) return pending;
+  const run = generateSummaryUncached(owner, repo, pr, login).finally(() => inFlight.delete(key));
+  inFlight.set(key, run);
+  return run;
+}
+
+async function generateSummaryUncached(owner: string, repo: string, pr: PullDetail, login?: string): Promise<Summary> {
+  const guidance = await getRepoGuidance(owner, repo, pr.baseRef, login);
   const client = new Anthropic();
   let response;
   try {

@@ -35,12 +35,17 @@ base branch, it is fed to the model as the team's conventions and the PR is judg
 
 ## How it works
 
-- `src/lib/github.ts` talks to GitHub over HTTPS with Octokit. No SSH, no `gh` dependency at runtime
-  beyond an optional `gh auth token` fallback for the token.
+- `src/lib/accounts.ts` discovers every account you are logged into with `gh auth login` (plus
+  `GITHUB_TOKEN` if set). The sidebar switches between them; reviews post as whichever is selected.
+  Pinned repos are remembered per account.
+- `src/lib/github.ts` talks to GitHub over HTTPS with Octokit using the selected account's token.
 - `src/lib/summarize.ts` builds one prompt from the PR (patches plus full head contents of changed
   files) and asks Claude for a structured summary matching `src/lib/schema.ts`. Results cache on disk in
   `data/cache/` keyed by head SHA, so a summary is generated once per push.
 - `data/repos.json` holds the sidebar. `PR_VANTAGE_REPOS=owner/a,owner/b` seeds it.
+- `src/lib/prewarm.ts` polls pinned repos while the app runs and generates summaries for PR heads
+  that do not have one yet, so pages open instantly. Drafts and PRs untouched for a few days are
+  skipped. Tune or disable it with the `PR_VANTAGE_PREWARM_*` variables in `.env.local.example`.
 
 ## Known POC limits
 

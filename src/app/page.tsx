@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { listRepos } from "@/lib/repos";
+import { currentAccount } from "@/lib/accounts";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const repos = await listRepos();
+  const me = await currentAccount().catch(() => null);
+  const repos = await listRepos(me?.login);
   if (repos.length > 0) redirect(`/${repos[0].owner}/${repos[0].repo}`);
   return (
     <div className="flex min-h-screen items-center justify-center p-12">

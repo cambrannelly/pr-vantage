@@ -1,27 +1,14 @@
 import { Octokit } from "@octokit/rest";
-import { execSync } from "node:child_process";
+import { currentAccount, tokenFor } from "./accounts";
 
-let cachedToken: string | null = null;
-
-export function resolveGitHubToken(): string {
-  if (cachedToken) return cachedToken;
-  const fromEnv = process.env.GITHUB_TOKEN?.trim();
-  if (fromEnv) return (cachedToken = fromEnv);
-  try {
-    const fromGh = execSync("gh auth token", { stdio: ["ignore", "pipe", "ignore"] })
-      .toString()
-      .trim();
-    if (fromGh) return (cachedToken = fromGh);
-  } catch {
-    // gh not installed or not logged in
-  }
-  throw new Error(
-    "No GitHub token. Set GITHUB_TOKEN in .env.local or run `gh auth login`.",
-  );
-}
-
-export function gh(): Octokit {
-  return new Octokit({ auth: resolveGitHubToken() });
+/**
+ * An Octokit for a GitHub identity. With no argument, uses the account the
+ * browser session selected (cookie), falling back to the default account.
+ * Background work passes an explicit login.
+ */
+export async function gh(login?: string): Promise<Octokit> {
+  const who = login ?? (await currentAccount()).login;
+  return new Octokit({ auth: await tokenFor(who) });
 }
 
 export type PullSummaryRow = {
@@ -43,8 +30,8 @@ export type PullSummaryRow = {
   url: string;
 };
 
-export async function listOpenPulls(owner: string, repo: string): Promise<PullSummaryRow[]> {
-  const octokit = gh();
+export async function listOpenPulls(owner: string, repo: string, login?: string): Promise<PullSummaryRow[]> {
+  const octokit = await gh(login);
   // GraphQL gives us review decision + line stats in one round trip.
   const query = `
     query($owner: String!, $repo: String!) {
@@ -122,8 +109,8 @@ export type PullDetail = {
   comments: { author: string; body: string; createdAt: string }[];
 };
 
-export async function getPullDetail(owner: string, repo: string, number: number): Promise<PullDetail> {
-  const octokit = gh();
+export async function getPullDetail(owner: string, repo: string, number: number, login?: string): Promise<PullDetail> {
+  const octokit = await gh(login);
   const [{ data: pr }, files, { data: reviews }, { data: comments }] = await Promise.all([
     octokit.rest.pulls.get({ owner, repo, pull_number: number }),
     octokit.paginate(octokit.rest.pulls.listFiles, { owner, repo, pull_number: number, per_page: 100 }),
@@ -177,8 +164,8 @@ export async function getPullDetail(owner: string, repo: string, number: number)
 const MAX_FILE_CHARS = 16_000;
 
 /** Full file contents at the PR head, so the model sees symbols in context, not just hunks. */
-export async function attachHeadContents(detail: PullDetail): Promise<PullDetail> {
-  const octokit = gh();
+export async function attachHeadContents(detail: PullDetail, login?: string): Promise<PullDetail> {
+  const octokit = await gh(login);
   const { owner, repo } = detail.headRepo;
   const targets = detail.files.filter((f) => f.status !== "removed" && !isBinaryish(f.path));
   const chunk = 8;
@@ -214,7 +201,7 @@ export async function submitReview(
   event: ReviewEvent,
   body: string,
 ) {
-  const octokit = gh();
+  const octokit = await gh();
   const { data } = await octokit.rest.pulls.createReview({
     owner,
     repo,
@@ -226,7 +213,7 @@ export async function submitReview(
 }
 
 export async function validateRepo(owner: string, repo: string) {
-  const octokit = gh();
+  const octokit = await gh();
   const { data } = await octokit.rest.repos.get({ owner, repo });
   return { owner: data.owner.login, repo: data.name, description: data.description ?? "", private: data.private };
 }
@@ -235,8 +222,8 @@ const GUIDANCE_FILES = [".pr-vantage.md", "ARCHITECTURE.md", "CLAUDE.md", "AGENT
 const MAX_GUIDANCE_CHARS = 20_000;
 
 /** Repo-authored architecture notes and rules, read from the base branch. Same idea as Greptile consuming CLAUDE.md. */
-export async function getRepoGuidance(owner: string, repo: string, ref: string): Promise<{ path: string; text: string }[]> {
-  const octokit = gh();
+export async function getRepoGuidance(owner: string, repo: string, ref: string, login?: string): Promise<{ path: string; text: string }[]> {
+  const octokit = await gh(login);
   const results = await Promise.all(
     GUIDANCE_FILES.map(async (path) => {
       try {

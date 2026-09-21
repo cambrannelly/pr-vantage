@@ -4,14 +4,29 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { RepoRef } from "@/lib/repos";
+import type { Account } from "@/lib/accounts";
 
-export function Sidebar({ repos: initial }: { repos: RepoRef[] }) {
+export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]; accounts: Account[]; active: string | null }) {
   const [repos, setRepos] = useState(initial);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+
+  async function switchAccount(login: string) {
+    if (login === active) return;
+    setSwitching(true);
+    const res = await fetch("/api/account", { method: "POST", body: JSON.stringify({ login }) });
+    setSwitching(false);
+    if (!res.ok) return;
+    // Pins and PR lists are per identity, so start from the top.
+    router.push("/");
+    router.refresh();
+  }
+
+  const me = accounts.find((a) => a.login === active) ?? null;
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
@@ -86,6 +101,52 @@ export function Sidebar({ repos: initial }: { repos: RepoRef[] }) {
           {busy ? "Checking…" : "Add repository"}
         </button>
       </form>
+      <div className="border-t border-line px-3 py-3">
+        <div className="eyebrow px-2 pb-2">Reviewing as</div>
+        {accounts.length === 0 ? (
+          <p className="px-2 text-[12.5px] leading-snug text-muted">
+            No GitHub login found. Run <span className="mono text-ink-2">gh auth login</span> and restart the dev server.
+          </p>
+        ) : accounts.length === 1 && me ? (
+          <AccountRow account={me} />
+        ) : (
+          <div className="relative">
+            <select
+              aria-label="GitHub account"
+              value={active ?? ""}
+              onChange={(e) => switchAccount(e.target.value)}
+              disabled={switching}
+              className="mono !text-[12.5px] w-full appearance-none pr-8"
+            >
+              {accounts.map((a) => (
+                <option key={a.login} value={a.login}>
+                  {a.login}
+                  {a.source === "env" ? " (GITHUB_TOKEN)" : ""}
+                </option>
+              ))}
+            </select>
+            {me?.avatarUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={me.avatarUrl} alt="" className="pointer-events-none absolute right-2.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full" />
+            )}
+          </div>
+        )}
+      </div>
     </aside>
+  );
+}
+
+function AccountRow({ account }: { account: Account }) {
+  return (
+    <div className="flex items-center gap-2.5 px-2">
+      {account.avatarUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={account.avatarUrl} alt="" className="h-6 w-6 rounded-full" />
+      )}
+      <div className="min-w-0">
+        <div className="mono truncate text-[12.5px] text-ink">{account.login}</div>
+        {account.name && <div className="truncate text-[11.5px] text-muted">{account.name}</div>}
+      </div>
+    </div>
   );
 }
