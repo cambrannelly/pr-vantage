@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { ReviewEvent } from "@/lib/github";
 import { Markdown } from "./Markdown";
 
-type Existing = { author: string; state: string; body: string; submittedAt: string };
+type Existing = { author: string; state: string; body: string; submittedAt: string; url?: string };
 
 const STATE_CLS: Record<string, string> = {
   APPROVED: "tag-moss",
@@ -33,7 +33,7 @@ export function ReviewPanel({ owner, repo, number, reviews, verdictHint }: {
     setBusy(null);
     if (!res.ok) return setResult({ ok: false, text: json.error ?? "Failed" });
     setResult({ ok: true, text: `Posted ${event.toLowerCase().replace("_", " ")}.` });
-    setPosted((p) => [...p, { author: "you", state: json.state, body, submittedAt: new Date().toISOString() }]);
+    setPosted((p) => [...p, { author: "you", state: json.state, body, submittedAt: new Date().toISOString(), url: json.url }]);
     setBody("");
   }
 
@@ -83,6 +83,11 @@ export function ReviewPanel({ owner, repo, number, reviews, verdictHint }: {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="min-w-0 truncate font-medium">{r.author}</span>
                   <span className={`tag ${STATE_CLS[r.state] ?? ""}`}>{r.state.toLowerCase().replace("_", " ")}</span>
+                  {r.url && (
+                    <a href={r.url} target="_blank" rel="noreferrer" title="Open this review and its line comments on GitHub" className="mono ml-auto text-[11px] text-muted hover:text-amber">
+                      on github ↗
+                    </a>
+                  )}
                 </div>
                 {r.body && (
                   <details className="mt-1 group">

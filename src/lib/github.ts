@@ -132,7 +132,7 @@ export type PullDetail = {
   createdAt: string;
   mergeable: boolean | null;
   files: ChangedFile[];
-  reviews: { author: string; state: string; body: string; submittedAt: string }[];
+  reviews: { author: string; state: string; body: string; submittedAt: string; url: string }[];
   comments: { author: string; body: string; createdAt: string }[];
 };
 
@@ -179,6 +179,7 @@ export async function getPullDetail(owner: string, repo: string, number: number,
         state: r.state,
         body: r.body ?? "",
         submittedAt: r.submitted_at ?? "",
+        url: r.html_url,
       })),
     comments: comments.map((c) => ({
       author: c.user?.login ?? "ghost",

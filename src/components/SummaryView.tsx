@@ -19,7 +19,7 @@ type Props = {
   number: number;
   headSha: string;
   files: ChangedFile[];
-  reviews: { author: string; state: string; body: string; submittedAt: string }[];
+  reviews: { author: string; state: string; body: string; submittedAt: string; url: string }[];
 };
 
 const ATTENTION: Record<string, { cls: string; label: string; weight: number }> = {
