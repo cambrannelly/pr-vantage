@@ -26,6 +26,13 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
     router.refresh();
   }
 
+  async function refreshAccounts() {
+    setSwitching(true);
+    await fetch("/api/account", { method: "POST", body: JSON.stringify({ refresh: true }) });
+    setSwitching(false);
+    router.refresh();
+  }
+
   const me = accounts.find((a) => a.login === active) ?? null;
 
   async function add(e: React.FormEvent) {
@@ -105,10 +112,20 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
         </button>
       </form>
       <div className="border-t border-line px-3 py-3">
-        <div className="eyebrow px-2 pb-2">Reviewing as</div>
+        <div className="flex items-baseline justify-between px-2 pb-2">
+          <span className="eyebrow">Reviewing as</span>
+          <button
+            onClick={refreshAccounts}
+            disabled={switching}
+            title="Re-read accounts from gh. Add one with `gh auth login`, remove one with `gh auth logout -u <login>`."
+            className="mono text-[11px] text-faint transition hover:text-ink disabled:opacity-50"
+          >
+            {switching ? "…" : "↻ refresh"}
+          </button>
+        </div>
         {accounts.length === 0 ? (
           <p className="px-2 text-[12.5px] leading-snug text-muted">
-            No GitHub login found. Run <span className="mono text-ink-2">gh auth login</span> and restart the dev server.
+            No GitHub login found. Run <span className="mono text-ink-2">gh auth login</span>, then refresh.
           </p>
         ) : accounts.length === 1 && me ? (
           <AccountRow account={me} />
@@ -133,6 +150,12 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
               <img src={me.avatarUrl} alt="" className="pointer-events-none absolute right-2.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full" />
             )}
           </div>
+        )}
+        {accounts.length > 0 && (
+          <p className="mt-2 px-2 text-[11px] leading-snug text-faint">
+            Accounts come from the gh CLI. <span className="mono">gh auth login</span> adds one,{" "}
+            <span className="mono">gh auth logout -u name</span> removes one, then refresh.
+          </p>
         )}
       </div>
     </aside>
