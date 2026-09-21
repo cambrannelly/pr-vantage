@@ -98,12 +98,16 @@ export function SettingsForm({ initial, providers }: {
     }
   }
 
-  function cardStatus(p: Provider): { ok: boolean; text: string } {
-    if (p === "openai" && openaiAuth === "chatgpt") {
-      return codex.signedIn ? { ok: true, text: `ChatGPT · ${codex.email ?? "signed in"}` } : { ok: false, text: "ChatGPT · not signed in" };
-    }
-    const k = keys[p];
-    return k.set ? { ok: true, text: `key saved ${k.hint}` } : { ok: false, text: "no key yet" };
+  /** Dot colour: green for the provider summaries actually use, amber for one that is ready but idle, grey for none. */
+  function cardStatus(p: Provider): { dot: string; text: string } {
+    const chatgpt = p === "openai" && openaiAuth === "chatgpt";
+    const ready = chatgpt ? codex.signedIn : keys[p].set;
+    const inUse = ready && saved.provider === p;
+    const dot = inUse ? "bg-moss" : ready ? "bg-amber" : "bg-faint";
+    const text = chatgpt
+      ? codex.signedIn ? `ChatGPT · ${codex.email ?? "signed in"}` : "ChatGPT · not signed in"
+      : keys[p].set ? `key saved ${keys[p].hint}` : "no key yet";
+    return { dot, text: inUse ? `${text} · in use` : text };
   }
 
   return (
@@ -126,7 +130,7 @@ export function SettingsForm({ initial, providers }: {
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-semibold">{providers[p].label}</span>
-                  <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${st.ok ? "bg-moss" : "bg-faint"}`} />
+                  <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${st.dot}`} />
                 </div>
                 <div className="mono mt-1 truncate text-[11px] text-muted">{st.text}</div>
               </button>
