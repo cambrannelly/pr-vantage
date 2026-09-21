@@ -20,7 +20,10 @@ function ago(iso: string | null) {
  */
 export function RepoPicker({ onPick, busy }: { onPick: (input: string) => Promise<void>; busy: boolean }) {
   const [q, setQ] = useState("");
+  /** Collapsed shows a single "+ Add repository" button; expanded shows the search field with the list open. */
+  const [expanded, setExpanded] = useState(false);
   const [open, setOpen] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<Candidate[] | null>(null);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -51,11 +54,24 @@ export function RepoPicker({ onPick, busy }: { onPick: (input: string) => Promis
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+      if (box.current && !box.current.contains(e.target as Node)) collapse();
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
+
+  function expand() {
+    setExpanded(true);
+    setOpen(true);
+    // The input mounts on this render; focus it once it exists.
+    requestAnimationFrame(() => input.current?.focus());
+  }
+
+  function collapse() {
+    setOpen(false);
+    setExpanded(false);
+    setQ("");
+  }
 
   const typedRef = q.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").match(/^([^/\s]+)\/([^/\s]+)$/);
   const typedKey = typedRef ? `${typedRef[1]}/${typedRef[2]}`.toLowerCase() : null;
@@ -63,17 +79,16 @@ export function RepoPicker({ onPick, busy }: { onPick: (input: string) => Promis
   const rows = (items ?? []).filter((r) => !r.pinned);
   const optionCount = rows.length + (showTyped ? 1 : 0);
 
-  async function pick(input: string) {
-    setOpen(false);
-    setQ("");
-    await onPick(input);
+  async function pick(value: string) {
+    collapse();
+    await onPick(value);
   }
 
   function onKey(e: React.KeyboardEvent) {
     if (!open) { if (e.key === "ArrowDown") setOpen(true); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); setCursor((c) => Math.min(c + 1, optionCount - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setCursor((c) => Math.max(c - 1, 0)); }
-    else if (e.key === "Escape") setOpen(false);
+    else if (e.key === "Escape") collapse();
     else if (e.key === "Enter") {
       e.preventDefault();
       if (showTyped && cursor === 0) return void pick(q);
@@ -82,14 +97,23 @@ export function RepoPicker({ onPick, busy }: { onPick: (input: string) => Promis
     }
   }
 
+  if (!expanded) {
+    return (
+      <button onClick={expand} disabled={busy} className="btn w-full justify-center">
+        <span className="text-amber">+</span> Add repository
+      </button>
+    );
+  }
+
   return (
     <div ref={box} className="relative">
       <input
+        ref={input}
         value={q}
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKey}
-        placeholder="Find a repository…"
+        placeholder="Search your repositories…"
         className="mono !text-[12.5px]"
         disabled={busy}
         aria-expanded={open}
