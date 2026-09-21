@@ -7,7 +7,7 @@ import type { RepoRef } from "@/lib/repos";
 import type { Account } from "@/lib/accounts";
 import { RepoPicker } from "./RepoPicker";
 
-export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]; accounts: Account[]; active: string | null }) {
+export function Sidebar({ repos: initial, accounts, active, llm }: { repos: RepoRef[]; accounts: Account[]; active: string | null; llm: { text: string; ok: boolean } }) {
   const [repos, setRepos] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,6 +145,9 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
             <span className="mono">gh auth logout -u name</span> removes one, then refresh.
           </p>
         )}
+        <p className={`mono mt-3 truncate px-2 text-[11px] ${llm.ok ? "text-faint" : "text-rust"}`} title="Set PR_VANTAGE_PROVIDER and PR_VANTAGE_MODEL in .env.local">
+          model · {llm.text}
+        </p>
       </div>
     </aside>
   );

@@ -1,11 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { gh, type ChangedFile, type PullDetail } from "./github";
-import { EFFORT, MODEL } from "./summarize";
+import { generateStructured } from "./llm";
 
 const CACHE_DIR = path.join(process.cwd(), "data", "cache", "files");
 const VERSION = "f1";
@@ -86,25 +84,13 @@ export async function generateFileBreakdown(owner: string, repo: string, pr: Pul
     full ? `## Full file at PR head\n\`\`\`\n${full}\n\`\`\`` : "",
   ].filter(Boolean);
 
-  const client = new Anthropic();
-  let response;
-  try {
-    response = await client.messages.parse({
-      model: MODEL,
-      max_tokens: 8000,
-      system: SYSTEM,
-      messages: [{ role: "user", content: parts.join("\n\n") }],
-      output_config: { format: zodOutputFormat(FileBreakdownSchema), effort: EFFORT },
-    });
-  } catch (err) {
-    if (err instanceof Error && /Could not resolve authentication/.test(err.message)) {
-      throw new Error("No Anthropic credentials. Add ANTHROPIC_API_KEY to .env.local and restart `pnpm dev`.");
-    }
-    throw err;
-  }
-  if (response.stop_reason === "refusal") throw new Error("Model declined to explain this file.");
-  const out = response.parsed_output;
-  if (!out) throw new Error("Model output did not match the file breakdown schema.");
+  const { parsed: out } = await generateStructured({
+    system: SYSTEM,
+    user: parts.join("\n\n"),
+    schema: FileBreakdownSchema,
+    name: "file_breakdown",
+    maxTokens: 8000,
+  });
 
   await fs.mkdir(CACHE_DIR, { recursive: true });
   await fs.writeFile(cp, JSON.stringify(out, null, 2));

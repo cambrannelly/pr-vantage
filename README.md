@@ -7,7 +7,7 @@ actually deserve your eyes. Approve, comment, or request changes without leaving
 ## Run it
 
 ```bash
-cp .env.local.example .env.local   # add ANTHROPIC_API_KEY; GITHUB_TOKEN is optional if `gh auth login` is done
+cp .env.local.example .env.local   # add one model API key (Anthropic, OpenAI, or Kimi); GitHub comes from `gh auth login`
 pnpm install
 pnpm dev
 ```
@@ -45,12 +45,16 @@ base branch, it is fed to the model as the team's conventions and the PR is judg
 - The sidebar picker lists every repo the selected account can see (own, collaborator, and org),
   most recently pushed first, and filters as you type. Pasting `owner/repo` or a URL still works.
 - `src/lib/github.ts` talks to GitHub over HTTPS with Octokit using the selected account's token.
+- `src/lib/llm.ts` is the only place a model is called. Anthropic is native; OpenAI, Kimi, and any
+  OpenAI-compatible endpoint go through the OpenAI SDK with a base URL. Set one API key and it is
+  picked up; `PR_VANTAGE_PROVIDER` and `PR_VANTAGE_MODEL` override the choice. Every pass asks for
+  JSON matching a zod schema and validates it, so providers are interchangeable.
 - `src/lib/summarize.ts` builds one prompt from the PR (patches plus full head contents of changed
-  files) and streams a structured summary from Claude. The model refers to files by index so it
+  files) and streams a structured summary from the model. The model refers to files by index so it
   does not spend output tokens repeating long paths; `resolveSummary` maps them back. Snapshots are
   pushed to the page as they arrive, so the intent and architecture show while files are still being
   classified. Results cache on disk in `data/cache/` keyed by head SHA, so a summary is generated
-  once per push. `PR_VANTAGE_MODEL` and `PR_VANTAGE_EFFORT` trade quality for speed.
+  once per push. `PR_VANTAGE_EFFORT` trades quality for speed.
 - `data/repos.json` holds the sidebar. `PR_VANTAGE_REPOS=owner/a,owner/b` seeds it.
 - `src/lib/prewarm.ts` polls pinned repos while the app runs and generates summaries for PR heads
   that do not have one yet, so pages open instantly. Drafts and PRs untouched for a few days are
