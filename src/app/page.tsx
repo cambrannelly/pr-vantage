@@ -1,17 +1,24 @@
 import Link from "next/link";
 import { listRepos } from "@/lib/repos";
 import { currentAccount } from "@/lib/accounts";
+import { llmConfig } from "@/lib/llm";
 
 export const dynamic = "force-dynamic";
 
 /** Neutral landing: nothing selected. Shown on first load and after an account switch. */
 export default async function Home() {
   const me = await currentAccount().catch(() => null);
-  const repos = await listRepos(me?.login);
+  const [repos, llm] = await Promise.all([listRepos(me?.login), llmConfig()]);
 
   return (
     <div className="flex min-h-screen items-center justify-center p-12">
       <div className="w-full max-w-xl reveal">
+        {!llm.apiKey && (
+          <Link href="/settings" className="mb-8 flex items-center justify-between gap-4 rounded-lg border border-amber/40 bg-amber/5 px-4 py-3 text-[13px] transition hover:bg-amber/10">
+            <span>No model configured yet. Add an API key to start generating summaries.</span>
+            <span className="mono shrink-0 text-amber">open settings ›</span>
+          </Link>
+        )}
         {repos.length === 0 ? (
           <>
             <div className="eyebrow">Getting started</div>

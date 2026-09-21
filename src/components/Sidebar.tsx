@@ -145,9 +145,13 @@ export function Sidebar({ repos: initial, accounts, active, llm }: { repos: Repo
             <span className="mono">gh auth logout -u name</span> removes one, then refresh.
           </p>
         )}
-        <p className={`mono mt-3 break-all px-2 text-[11px] leading-snug ${llm.ok ? "text-faint" : "text-rust"}`} title="Set PR_VANTAGE_PROVIDER and PR_VANTAGE_MODEL in .env.local">
-          {llm.text}
-        </p>
+        <Link href="/settings" className="group mt-3 block rounded px-2 py-1.5 transition hover:bg-bg-3" title="Model settings">
+          <span className="flex items-baseline justify-between gap-2">
+            <span className="eyebrow group-hover:!text-ink transition">Model</span>
+            <span className={`mono text-[11px] ${pathname === "/settings" ? "text-amber" : "text-faint group-hover:text-ink"}`}>settings ›</span>
+          </span>
+          <span className={`mono mt-0.5 block break-words text-[11px] leading-snug ${llm.ok ? "text-muted" : "text-rust"}`}>{llm.text}</span>
+        </Link>
       </div>
     </aside>
   );

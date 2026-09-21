@@ -174,7 +174,7 @@ async function generateSummaryUncached(owner: string, repo: string, pr: PullDeta
     onText,
   });
   const secs = ((Date.now() - started) / 1000).toFixed(1);
-  console.log(`[summary] ${owner}/${repo}#${pr.number} ${model} effort=${llmConfig().effort} in=${usage.input} out=${usage.output} ${secs}s`);
+  console.log(`[summary] ${owner}/${repo}#${pr.number} ${model} effort=${(await llmConfig()).effort} in=${usage.input} out=${usage.output} ${secs}s`);
   const summary = resolveSummary(parsed, paths);
 
   await fs.mkdir(CACHE_DIR, { recursive: true });

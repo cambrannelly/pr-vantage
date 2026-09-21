@@ -29,7 +29,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-full">
         <div className="relative z-10 flex min-h-screen">
           {/* Keyed by account so the sidebar's local repo state resets on a switch instead of keeping the old list. */}
-          <Sidebar key={active?.login ?? "none"} repos={repos} accounts={accounts} active={active?.login ?? null} llm={llmLabel()} />
+          <Sidebar key={active?.login ?? "none"} repos={repos} accounts={accounts} active={active?.login ?? null} llm={await llmLabel()} />
           <main className="min-w-0 flex-1">{children}</main>
         </div>
       </body>
@@ -38,8 +38,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 }
 
 /** "provider · model", or a hint when no key is configured. */
-function llmLabel(): { text: string; ok: boolean } {
-  const c = llmConfig();
-  if (!c.apiKey) return { text: `no ${c.provider} key: set ${c.keyVar}`, ok: false };
+async function llmLabel(): Promise<{ text: string; ok: boolean }> {
+  const c = await llmConfig();
+  if (!c.apiKey) return { text: `no ${c.provider} API key`, ok: false };
   return { text: `${c.provider} · ${c.model}`, ok: true };
 }

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import OpenAI from "openai";
 import { z } from "zod";
+import { keyFor, PROVIDER_META, PROVIDERS, readSettings, type Effort, type Provider } from "./settings";
 
 /**
  * One structured-output call, any provider. Anthropic is native; OpenAI, Kimi, and any
@@ -9,16 +10,13 @@ import { z } from "zod";
  * through the OpenAI SDK with a base URL. Auth is always an API key: consumer subscriptions
  * (Claude Max, ChatGPT Plus) are not licensed for third-party tools.
  *
- * Env:
- *   PR_VANTAGE_PROVIDER   anthropic | openai | kimi | custom   (default: first provider with a key)
- *   PR_VANTAGE_MODEL      override the provider's default model
- *   PR_VANTAGE_EFFORT     low | medium | high                  (default medium)
- *   ANTHROPIC_API_KEY, OPENAI_API_KEY, KIMI_API_KEY (or MOONSHOT_API_KEY)
- *   PR_VANTAGE_LLM_BASE_URL + PR_VANTAGE_LLM_API_KEY           for custom
+ * Configured on the /settings page (data/settings.json). The environment is the fallback:
+ *   PR_VANTAGE_PROVIDER, PR_VANTAGE_MODEL, PR_VANTAGE_EFFORT,
+ *   ANTHROPIC_API_KEY, OPENAI_API_KEY, KIMI_API_KEY (or MOONSHOT_API_KEY),
+ *   PR_VANTAGE_LLM_BASE_URL + PR_VANTAGE_LLM_API_KEY for a custom endpoint.
  */
 
-export type Provider = "anthropic" | "openai" | "kimi" | "custom";
-export type Effort = "low" | "medium" | "high";
+export type { Provider, Effort } from "./settings";
 
 export type LlmConfig = {
   provider: Provider;
@@ -28,48 +26,30 @@ export type LlmConfig = {
   baseUrl: string | null;
   /** Env var to set when apiKey is missing. */
   keyVar: string;
+  /** Where the key came from, for the settings UI. */
+  keySource: "settings" | "env" | null;
 };
 
-const DEFAULT_MODEL: Record<Provider, string> = {
-  anthropic: "claude-opus-5",
-  openai: "gpt-6-astra",
-  kimi: "kimi-k3",
-  custom: "",
-};
-
-const BASE_URL: Record<Provider, string | null> = {
-  anthropic: null,
-  openai: null,
-  kimi: "https://api.moonshot.ai/v1",
-  custom: null,
-};
-
-function env(name: string): string | null {
-  const v = process.env[name]?.trim();
-  return v ? v : null;
-}
-
-export function llmConfig(): LlmConfig {
-  const explicit = env("PR_VANTAGE_PROVIDER")?.toLowerCase() as Provider | undefined;
-  const keys: Record<Provider, { value: string | null; name: string }> = {
-    anthropic: { value: env("ANTHROPIC_API_KEY"), name: "ANTHROPIC_API_KEY" },
-    openai: { value: env("OPENAI_API_KEY"), name: "OPENAI_API_KEY" },
-    kimi: { value: env("KIMI_API_KEY") ?? env("MOONSHOT_API_KEY"), name: "KIMI_API_KEY" },
-    custom: { value: env("PR_VANTAGE_LLM_API_KEY"), name: "PR_VANTAGE_LLM_API_KEY" },
-  };
+/** Effective configuration: settings.json first, environment second. */
+export async function llmConfig(): Promise<LlmConfig> {
+  const s = await readSettings();
+  const explicit = (s.provider ?? process.env.PR_VANTAGE_PROVIDER?.trim().toLowerCase()) as Provider | undefined;
   const provider: Provider =
-    explicit && explicit in keys
+    explicit && PROVIDERS.includes(explicit)
       ? explicit
-      : ((["anthropic", "openai", "kimi", "custom"] as Provider[]).find((p) => keys[p].value) ?? "anthropic");
-  const effortRaw = env("PR_VANTAGE_EFFORT")?.toLowerCase();
+      : (PROVIDERS.find((p) => keyFor(s, p).value) ?? "anthropic");
+  const effortRaw = s.effort ?? process.env.PR_VANTAGE_EFFORT?.trim().toLowerCase();
   const effort: Effort = effortRaw === "low" || effortRaw === "high" ? effortRaw : "medium";
+  const key = keyFor(s, provider);
+  const meta = PROVIDER_META[provider];
   return {
     provider,
-    model: env("PR_VANTAGE_MODEL") ?? DEFAULT_MODEL[provider],
+    model: s.model?.trim() || process.env.PR_VANTAGE_MODEL?.trim() || meta.defaultModel,
     effort,
-    apiKey: keys[provider].value,
-    baseUrl: provider === "custom" ? env("PR_VANTAGE_LLM_BASE_URL") : BASE_URL[provider],
-    keyVar: keys[provider].name,
+    apiKey: key.value,
+    baseUrl: provider === "custom" ? s.customBaseUrl?.trim() || process.env.PR_VANTAGE_LLM_BASE_URL?.trim() || null : meta.baseUrl,
+    keyVar: meta.keyVar,
+    keySource: key.source,
   };
 }
 
@@ -101,15 +81,15 @@ export type StructuredRequest<T> = {
 };
 
 export async function generateStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
-  const cfg = llmConfig();
+  const cfg = await llmConfig();
   if (!cfg.apiKey) {
-    throw new LlmError(`No ${cfg.provider} API key. Set ${cfg.keyVar} in .env.local and restart \`pnpm dev\`.`, "config", 401);
+    throw new LlmError(`No ${cfg.provider} API key. Add one on the Settings page (or set ${cfg.keyVar} in .env.local).`, "config", 401);
   }
   if (cfg.provider === "custom" && !cfg.baseUrl) {
-    throw new LlmError("Custom provider needs PR_VANTAGE_LLM_BASE_URL (an OpenAI-compatible /v1 endpoint).", "config", 500);
+    throw new LlmError("The custom provider needs a base URL (an OpenAI-compatible /v1 endpoint). Set it on the Settings page.", "config", 500);
   }
   if (!cfg.model) {
-    throw new LlmError("Set PR_VANTAGE_MODEL for the custom provider.", "config", 500);
+    throw new LlmError("Pick a model on the Settings page.", "config", 500);
   }
   return cfg.provider === "anthropic" ? viaAnthropic(req, cfg) : viaOpenAICompatible(req, cfg);
 }
@@ -240,4 +220,25 @@ function mapOpenAIError(err: unknown, cfg: LlmConfig): Error {
   if (err instanceof OpenAI.RateLimitError) return new LlmError(`${label} rate limit hit. Try again shortly.`, "rate", 429);
   if (err instanceof OpenAI.APIError) return new LlmError(`${label} API error ${err.status}: ${err.message}`, "api", 502);
   return err instanceof Error ? err : new Error(String(err));
+}
+
+/* ---------------- Model discovery for the settings page ---------------- */
+
+/** Ask the provider which models this key can use. Doubles as a key check. */
+export async function listModels(provider: Provider, apiKey: string, baseUrl: string | null): Promise<string[]> {
+  try {
+    if (provider === "anthropic") {
+      const client = new Anthropic({ apiKey });
+      const ids: string[] = [];
+      for await (const m of client.models.list({ limit: 100 })) ids.push(m.id);
+      return ids.sort();
+    }
+    const client = new OpenAI({ apiKey, baseURL: baseUrl ?? PROVIDER_META[provider].baseUrl ?? undefined });
+    const ids: string[] = [];
+    for await (const m of client.models.list()) ids.push(m.id);
+    const chatty = provider === "openai" ? ids.filter((id) => /^(gpt|o\d|chatgpt)/.test(id) && !/(embedding|tts|whisper|realtime|audio|image|transcribe|moderation|search)/.test(id)) : ids;
+    return chatty.sort();
+  } catch (err) {
+    throw provider === "anthropic" ? mapAnthropicError(err) : mapOpenAIError(err, { provider, keyVar: PROVIDER_META[provider].keyVar } as LlmConfig);
+  }
 }
