@@ -145,8 +145,8 @@ export function Sidebar({ repos: initial, accounts, active, llm }: { repos: Repo
             <span className="mono">gh auth logout -u name</span> removes one, then refresh.
           </p>
         )}
-        <p className={`mono mt-3 truncate px-2 text-[11px] ${llm.ok ? "text-faint" : "text-rust"}`} title="Set PR_VANTAGE_PROVIDER and PR_VANTAGE_MODEL in .env.local">
-          model · {llm.text}
+        <p className={`mono mt-3 break-all px-2 text-[11px] leading-snug ${llm.ok ? "text-faint" : "text-rust"}`} title="Set PR_VANTAGE_PROVIDER and PR_VANTAGE_MODEL in .env.local">
+          {llm.text}
         </p>
       </div>
     </aside>
