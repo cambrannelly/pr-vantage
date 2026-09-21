@@ -204,8 +204,16 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
                   </div>
                   <p className="mt-2 text-ink-2"><Rich text={selectedComponent.summary} /></p>
                   {selectedComponent.files.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-muted">
-                      {selectedComponent.files.map((f) => <FileLink key={f} owner={owner} repo={repo} number={number} path={f} />)}
+                    <div className="mt-4 border-t border-amber/15 pt-3">
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="eyebrow">{selectedComponent.files.length === 1 ? "Implemented in" : `${selectedComponent.files.length} files`}</span>
+                        <span className="mono text-[11px] text-faint">open one for a purpose-by-purpose breakdown</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedComponent.files.map((f) => (
+                          <FileLink key={f} owner={owner} repo={repo} number={number} path={f} variant={selectedComponent.files.length === 1 ? "button" : "chip"} />
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -252,7 +260,7 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
                         {open && (
                           <div className="reveal px-3 pb-4 pl-[52px]">
                             <p className="text-ink-2"><Rich text={c.narrative} /></p>
-                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-muted">
+                            <div className="mt-3 flex flex-wrap gap-2">
                               {c.files.map((f) => <FileLink key={f} owner={owner} repo={repo} number={number} path={f} />)}
                             </div>
                           </div>
@@ -275,7 +283,7 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
                             <div key={i}>
                               <div className="font-medium text-ink-2">{c.title}</div>
                               <p className="mt-1 text-[14px] text-muted"><Rich text={c.narrative} /></p>
-                              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-faint">
+                              <div className="mt-2 flex flex-wrap gap-2">
                                 {c.files.map((f) => <FileLink key={f} owner={owner} repo={repo} number={number} path={f} />)}
                               </div>
                             </div>
@@ -372,7 +380,7 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
                         <div className="grid grid-cols-[110px_1fr_auto] items-start gap-4 py-3">
                           <span className={`tag ${a.cls} mt-0.5 justify-center`}>{a.label}</span>
                           <div className="min-w-0">
-                            <div className="truncate"><FileLink owner={owner} repo={repo} number={number} path={f.path} className="text-ink" /></div>
+                            <div className="truncate"><FileLink owner={owner} repo={repo} number={number} path={f.path} variant="row" className="text-ink" /></div>
                             <p className="mt-1 text-[14px] text-ink-2"><span className="text-muted">{f.role} · </span><Rich text={f.summary} /></p>
                           </div>
                           <div className="text-right">
@@ -410,15 +418,51 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
   );
 }
 
-/** A file path that opens the per-file breakdown page. */
-export function FileLink({ owner, repo, number, path, className }: { owner: string; repo: string; number: number; path: string; className?: string }) {
+/**
+ * A file path that opens the per-file breakdown page.
+ * "chip" (default) is a bordered, obviously clickable pill for inline lists.
+ * "button" is the full call-to-action used when a component has a single file.
+ * "row" is for the files table, where the whole line already reads as an entry.
+ */
+export function FileLink({ owner, repo, number, path, className, variant = "chip" }: {
+  owner: string; repo: string; number: number; path: string; className?: string; variant?: "chip" | "row" | "button";
+}) {
+  const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+  const base = path.slice(dir.length);
+  if (variant === "button") {
+    return (
+      <Link
+        href={fileHref(owner, repo, number, path)}
+        onClick={(e) => e.stopPropagation()}
+        className={`btn group/link !border-amber/50 !bg-amber/10 hover:!bg-amber/20 ${className ?? ""}`}
+      >
+        <span className="mono truncate text-[12.5px]"><span className="text-muted">{dir}</span><span className="text-ink">{base}</span></span>
+        <span className="shrink-0 text-amber">View breakdown →</span>
+      </Link>
+    );
+  }
+  if (variant === "row") {
+    return (
+      <Link
+        href={fileHref(owner, repo, number, path)}
+        onClick={(e) => e.stopPropagation()}
+        title="Open the purpose-by-purpose breakdown of this file"
+        className={`mono group/link inline-flex max-w-full items-baseline gap-1.5 transition hover:text-amber ${className ?? ""}`}
+      >
+        <span className="truncate"><span className="text-muted group-hover/link:text-amber/70">{dir}</span>{base}</span>
+        <span className="shrink-0 text-[11px] text-faint group-hover/link:text-amber">breakdown ›</span>
+      </Link>
+    );
+  }
   return (
     <Link
       href={fileHref(owner, repo, number, path)}
       onClick={(e) => e.stopPropagation()}
-      className={`mono underline decoration-line-2 underline-offset-[3px] transition hover:text-amber hover:decoration-amber ${className ?? ""}`}
+      title="Open the purpose-by-purpose breakdown of this file"
+      className={`mono inline-flex max-w-full items-baseline gap-1.5 rounded-md border border-line-2 bg-bg-2 px-2 py-1 text-[12px] leading-none text-ink-2 transition hover:border-amber/60 hover:bg-amber/5 hover:text-amber ${className ?? ""}`}
     >
-      {path}
+      <span className="truncate"><span className="text-muted">{dir}</span><span className="text-ink">{base}</span></span>
+      <span className="shrink-0 text-faint">›</span>
     </Link>
   );
 }

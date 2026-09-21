@@ -125,7 +125,7 @@ export function ReviewSection({ owner, repo, number, onVerdict, onTraceFiles }: 
                     </div>
                   )}
                   {r.files.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-muted">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       {r.files.map((f) => <FileLink key={f} owner={owner} repo={repo} number={number} path={f} />)}
                     </div>
                   )}
