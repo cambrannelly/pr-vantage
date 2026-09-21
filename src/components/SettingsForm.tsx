@@ -146,7 +146,8 @@ export function SettingsForm({ initial, providers }: {
               )}
             </div>
 
-            {provider === "openai" && (
+            {/* Once signed in with ChatGPT there is nothing to switch to; sign out brings the choice back. */}
+            {provider === "openai" && !(viaChatGPT && codex.signedIn) && (
               <div className="mt-3 inline-flex rounded-lg border border-line-2 bg-bg p-1 text-[13px]">
                 {(["key", "chatgpt"] as OpenAIAuth[]).map((a) => (
                   <button
