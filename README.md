@@ -52,6 +52,10 @@ base branch, it is fed to the model as the team's conventions and the PR is judg
   model, and effort, stored in `data/settings.json` (owner-only, gitignored). It can list the models a
   key can use. Defaults are the mid-tier model of each provider. On first run, a model key found in
   the environment is imported once so older setups keep working.
+- "ChatGPT subscription" is an unofficial provider: a device-code sign-in through the OAuth client of
+  OpenAI's Codex CLI, sending requests to the Codex backend, as pi and opencode do. OpenAI has neither
+  approved nor blocked third-party use, so it can stop working without notice. Anthropic subscriptions
+  are not offered: Anthropic bills third-party use of them per token and forbids it in its terms.
 - `src/lib/summarize.ts` builds one prompt from the PR (patches plus full head contents of changed
   files) and streams a structured summary from the model. The model refers to files by index so it
   does not spend output tokens repeating long paths; `resolveSummary` maps them back. Snapshots are

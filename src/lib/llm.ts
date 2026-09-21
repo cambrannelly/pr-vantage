@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import OpenAI from "openai";
 import { z } from "zod";
 import { keyFor, PROVIDER_META, PROVIDERS, readSettings, type Effort, type Provider } from "./settings";
+import { codexCredential } from "./codex-auth";
 
 /**
  * One structured-output call, any provider. Anthropic is native; OpenAI, Kimi, and any
@@ -19,22 +20,32 @@ export type LlmConfig = {
   provider: Provider;
   model: string;
   effort: Effort;
+  /** API key, or for the ChatGPT subscription provider the current access token. */
   apiKey: string | null;
   baseUrl: string | null;
+  /** ChatGPT account id, subscription provider only. */
+  accountId?: string;
 };
 
 /** Effective configuration from the settings store. */
 export async function llmConfig(): Promise<LlmConfig> {
   const s = await readSettings();
-  const provider: Provider = s.provider && PROVIDERS.includes(s.provider) ? s.provider : (PROVIDERS.find((p) => keyFor(s, p)) ?? "anthropic");
+  const provider: Provider =
+    s.provider && PROVIDERS.includes(s.provider)
+      ? s.provider
+      : (PROVIDERS.find((p) => (p === "codex" ? !!s.codex : !!keyFor(s, p))) ?? "anthropic");
   const meta = PROVIDER_META[provider];
-  return {
+  const base = {
     provider,
     model: s.model?.trim() || meta.defaultModel,
     effort: s.effort ?? "medium",
-    apiKey: keyFor(s, provider),
     baseUrl: provider === "custom" ? s.customBaseUrl?.trim() || null : meta.baseUrl,
   };
+  if (provider === "codex") {
+    const cred = await codexCredential().catch(() => null);
+    return { ...base, apiKey: cred?.access ?? null, accountId: cred?.accountId };
+  }
+  return { ...base, apiKey: keyFor(s, provider) };
 }
 
 export class LlmError extends Error {
@@ -67,7 +78,13 @@ export type StructuredRequest<T> = {
 export async function generateStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
   const cfg = await llmConfig();
   if (!cfg.apiKey) {
-    throw new LlmError(`No ${PROVIDER_META[cfg.provider].label} API key. Add one on the Settings page.`, "config", 401);
+    throw new LlmError(
+      cfg.provider === "codex"
+        ? "Not signed in to ChatGPT. Sign in on the Settings page."
+        : `No ${PROVIDER_META[cfg.provider].label} API key. Add one on the Settings page.`,
+      "config",
+      401,
+    );
   }
   if (cfg.provider === "custom" && !cfg.baseUrl) {
     throw new LlmError("The custom provider needs a base URL (an OpenAI-compatible /v1 endpoint). Set it on the Settings page.", "config", 500);
@@ -75,7 +92,9 @@ export async function generateStructured<T>(req: StructuredRequest<T>): Promise<
   if (!cfg.model) {
     throw new LlmError("Pick a model on the Settings page.", "config", 500);
   }
-  return cfg.provider === "anthropic" ? viaAnthropic(req, cfg) : viaOpenAICompatible(req, cfg);
+  if (cfg.provider === "anthropic") return viaAnthropic(req, cfg);
+  if (cfg.provider === "codex") return viaCodex(req, cfg);
+  return viaOpenAICompatible(req, cfg);
 }
 
 /* ---------------- Anthropic ---------------- */
@@ -203,10 +222,148 @@ function mapOpenAIError(err: unknown, cfg: LlmConfig): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
+/* ---------------- ChatGPT subscription via the Codex backend ---------------- */
+
+/**
+ * The Codex backend speaks the Responses API over SSE. It is what Codex CLI talks to with a
+ * ChatGPT login; the headers below mirror that client. `store` must be false.
+ */
+async function viaCodex<T>(req: StructuredRequest<T>, cfg: LlmConfig): Promise<StructuredResult<T>> {
+  const jsonSchema = z.toJSONSchema(req.schema) as Record<string, unknown>;
+  delete jsonSchema.$schema;
+  const url = `${(cfg.baseUrl ?? "https://chatgpt.com/backend-api").replace(/\/+$/, "")}/codex/responses`;
+  const headers = {
+    Authorization: `Bearer ${cfg.apiKey}`,
+    "chatgpt-account-id": cfg.accountId ?? "",
+    originator: "pr-vantage",
+    "OpenAI-Beta": "responses=experimental",
+    accept: "text/event-stream",
+    "content-type": "application/json",
+  };
+
+  const run = async (withFormat: boolean) => {
+    const instructions = withFormat
+      ? req.system
+      : `${req.system}\n\nRespond with a single JSON object matching this JSON Schema exactly:\n${JSON.stringify(jsonSchema)}`;
+    const body: Record<string, unknown> = {
+      model: cfg.model,
+      store: false,
+      stream: true,
+      instructions,
+      input: [{ role: "user", content: [{ type: "input_text", text: req.user }] }],
+      text: withFormat
+        ? { verbosity: "low", format: { type: "json_schema", name: req.name, schema: jsonSchema, strict: false } }
+        : { verbosity: "low" },
+      include: ["reasoning.encrypted_content"],
+      reasoning: { effort: cfg.effort, summary: "auto" },
+    };
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+    if (!res.ok) throw await codexHttpError(res);
+    if (!res.body) throw new LlmError("ChatGPT returned no response body.", "api", 502);
+
+    let text = "";
+    let usage = { input: 0, output: 0 };
+    let completed = false;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    const handle = (line: string) => {
+      if (!line.startsWith("data:")) return;
+      const raw = line.slice(5).trim();
+      if (!raw || raw === "[DONE]") return;
+      let ev: { type?: string; delta?: string; response?: { usage?: { input_tokens?: number; output_tokens?: number }; error?: { message?: string; code?: string } }; error?: { message?: string; code?: string }; message?: string };
+      try {
+        ev = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      switch (ev.type) {
+        case "response.output_text.delta":
+          if (ev.delta) {
+            text += ev.delta;
+            req.onText?.(ev.delta);
+          }
+          break;
+        case "response.completed":
+        case "response.done":
+        case "response.incomplete":
+          completed = true;
+          usage = { input: ev.response?.usage?.input_tokens ?? 0, output: ev.response?.usage?.output_tokens ?? 0 };
+          break;
+        case "response.failed":
+          throw new LlmError(`ChatGPT: ${ev.response?.error?.message ?? "response failed"}`, "api", 502);
+        case "error":
+          throw new LlmError(`ChatGPT: ${ev.error?.message ?? ev.message ?? "stream error"}`, "api", 502);
+      }
+    };
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        handle(buf.slice(0, nl).trimEnd());
+        buf = buf.slice(nl + 1);
+      }
+    }
+    if (buf.trim()) handle(buf.trim());
+    if (!completed) throw new LlmError("ChatGPT stream ended before the response completed.", "api", 502);
+    return { text, usage };
+  };
+
+  let out;
+  try {
+    out = await run(true);
+  } catch (err) {
+    // If this backend rejects text.format, ask for JSON in the prompt instead.
+    if (err instanceof LlmError && err.status === 400 && /format|schema/i.test(err.message)) out = await run(false);
+    else throw err;
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(out.text);
+  } catch {
+    throw new LlmError("ChatGPT returned malformed JSON.", "schema", 502);
+  }
+  const parsed = req.schema.safeParse(raw);
+  if (!parsed.success) throw new LlmError(`ChatGPT output did not match the schema: ${parsed.error.issues[0]?.message ?? "invalid"}`, "schema", 502);
+  return { parsed: parsed.data, usage: out.usage, model: cfg.model };
+}
+
+async function codexHttpError(res: Response): Promise<LlmError> {
+  const text = await res.text().catch(() => "");
+  let message = text.slice(0, 300) || res.statusText;
+  let kind: LlmError["kind"] = "api";
+  try {
+    const j = JSON.parse(text) as { error?: { code?: string; type?: string; message?: string; plan_type?: string; resets_at?: number } };
+    const e = j.error;
+    if (e) {
+      const code = e.code || e.type || "";
+      if (res.status === 429 || /usage_limit|usage_not_included|rate_limit/i.test(code)) {
+        const plan = e.plan_type ? ` (${e.plan_type.toLowerCase()} plan)` : "";
+        const mins = e.resets_at ? Math.max(0, Math.round((e.resets_at * 1000 - Date.now()) / 60_000)) : null;
+        message = `You have hit your ChatGPT usage limit${plan}.${mins !== null ? ` Try again in about ${mins} min.` : ""}`;
+        kind = "rate";
+      } else {
+        message = e.message ?? message;
+      }
+    }
+  } catch {
+    // not json
+  }
+  if (res.status === 401) return new LlmError("ChatGPT rejected the login. Sign in again on the Settings page.", "auth", 401);
+  return new LlmError(`ChatGPT error ${res.status}: ${message}`, kind, res.status === 400 ? 400 : res.status === 429 ? 429 : 502);
+}
+
 /* ---------------- Model discovery for the settings page ---------------- */
 
 /** Ask the provider which models this key can use. Doubles as a key check. */
 export async function listModels(provider: Provider, apiKey: string, baseUrl: string | null): Promise<string[]> {
+  if (provider === "codex") {
+    // The Codex backend has no public model listing; these are the slugs OpenAI documents for ChatGPT sign-in.
+    return ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+  }
   try {
     if (provider === "anthropic") {
       const client = new Anthropic({ apiKey });

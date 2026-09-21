@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { llmConfig } from "@/lib/llm";
+import { codexCredential } from "@/lib/codex-auth";
 import { keyFor, keyHint, PROVIDER_META, PROVIDERS, readSettings, updateSettings, type Effort, type Provider } from "@/lib/settings";
 
 /** Settings with keys masked to their last four characters. */
@@ -18,7 +19,13 @@ async function view() {
       }),
     ),
     providers: PROVIDER_META,
+    codex: await codexStatus(),
   };
+}
+
+async function codexStatus() {
+  const c = await codexCredential().catch(() => null);
+  return c ? { signedIn: true, email: c.email ?? null, plan: c.planType ?? null } : { signedIn: false, email: null, plan: null };
 }
 
 export async function GET() {

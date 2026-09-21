@@ -7,9 +7,9 @@ import path from "node:path";
  * to import a key from an older setup.
  */
 
-export type Provider = "anthropic" | "openai" | "kimi" | "custom";
+export type Provider = "anthropic" | "openai" | "codex" | "kimi" | "custom";
 export type Effort = "low" | "medium" | "high";
-export const PROVIDERS: Provider[] = ["anthropic", "openai", "kimi", "custom"];
+export const PROVIDERS: Provider[] = ["anthropic", "openai", "codex", "kimi", "custom"];
 
 export type Settings = {
   provider?: Provider;
@@ -17,10 +17,13 @@ export type Settings = {
   effort?: Effort;
   keys?: Partial<Record<Provider, string>>;
   customBaseUrl?: string;
+  /** ChatGPT subscription login for the Codex backend. Managed by codex-auth.ts. */
+  codex?: import("./codex-auth").CodexCredential;
 };
 
-export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | null; console: string | null; defaultModel: string; suggested: { id: string; note: string }[] }> = {
+export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | null; console: string | null; defaultModel: string; suggested: { id: string; note: string }[]; auth: "key" | "chatgpt" }> = {
   anthropic: {
+    auth: "key",
     label: "Anthropic",
     baseUrl: null,
     console: "https://console.anthropic.com/settings/keys",
@@ -32,6 +35,7 @@ export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | 
     ],
   },
   openai: {
+    auth: "key",
     label: "OpenAI",
     baseUrl: null,
     console: "https://platform.openai.com/api-keys",
@@ -42,7 +46,20 @@ export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | 
       { id: "gpt-5.6-luna", note: "cheapest" },
     ],
   },
+  codex: {
+    auth: "chatgpt",
+    label: "ChatGPT subscription",
+    baseUrl: "https://chatgpt.com/backend-api",
+    console: null,
+    defaultModel: "gpt-5.6-terra",
+    suggested: [
+      { id: "gpt-5.6-terra", note: "recommended: balanced" },
+      { id: "gpt-5.6-sol", note: "deeper reasoning" },
+      { id: "gpt-6-astra", note: "most capable, slowest" },
+    ],
+  },
   kimi: {
+    auth: "key",
     label: "Kimi (Moonshot)",
     baseUrl: "https://api.moonshot.ai/v1",
     console: "https://platform.kimi.ai/console/api-keys",
@@ -54,6 +71,7 @@ export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | 
     ],
   },
   custom: {
+    auth: "key",
     label: "OpenAI-compatible endpoint",
     baseUrl: null,
     console: null,

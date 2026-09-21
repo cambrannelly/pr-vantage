@@ -7,7 +7,7 @@ import { errorResponse } from "@/lib/api-errors";
 export async function POST(req: Request) {
   const { provider, apiKey, baseUrl } = (await req.json()) as { provider: Provider; apiKey?: string; baseUrl?: string };
   if (!PROVIDERS.includes(provider)) return NextResponse.json({ error: "Unknown provider" }, { status: 400 });
-  const key = apiKey?.trim() || keyFor(await readSettings(), provider);
+  const key = provider === "codex" ? "chatgpt" : apiKey?.trim() || keyFor(await readSettings(), provider);
   if (!key) return NextResponse.json({ error: "Enter an API key first." }, { status: 400 });
   if (provider === "custom" && !baseUrl?.trim()) return NextResponse.json({ error: "Enter the base URL first." }, { status: 400 });
   try {
