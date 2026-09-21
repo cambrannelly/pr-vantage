@@ -403,8 +403,8 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
       </div>
 
       <aside className="sticky top-8 self-start space-y-4">
-        <ChecksPanel owner={owner} repo={repo} sha={headSha} />
         <ReviewPanel owner={owner} repo={repo} number={number} reviews={reviews} verdictHint={verdict ?? undefined} />
+        <ChecksPanel owner={owner} repo={repo} sha={headSha} />
         <MergePanel owner={owner} repo={repo} number={number} headSha={headSha} />
         <AskPanel owner={owner} repo={repo} number={number} disabled={!summary || streaming} />
       </aside>
