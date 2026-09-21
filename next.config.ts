@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Keep the dev-tools badge off the account picker in the sidebar's bottom-left corner.
-  devIndicators: { position: "bottom-right" },
+  // Hide the Next dev-tools badge; it is noise on a full-height app layout.
+  devIndicators: false,
 };
 
 export default nextConfig;
