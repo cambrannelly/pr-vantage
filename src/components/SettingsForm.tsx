@@ -99,7 +99,7 @@ export function SettingsForm({ initial, providers }: {
   }
 
   /** Dot colour: green for the provider summaries actually use, amber for one that is ready but idle, grey for none. */
-  function cardStatus(p: Provider): { dot: string; text: string } {
+  function cardStatus(p: Provider): { dot: string; text: string; inUse: boolean } {
     const chatgpt = p === "openai" && openaiAuth === "chatgpt";
     const ready = chatgpt ? codex.signedIn : keys[p].set;
     const inUse = ready && saved.provider === p;
@@ -107,7 +107,7 @@ export function SettingsForm({ initial, providers }: {
     const text = chatgpt
       ? codex.signedIn ? `ChatGPT · ${codex.email ?? "signed in"}` : "ChatGPT · not signed in"
       : keys[p].set ? `key saved ${keys[p].hint}` : "no key yet";
-    return { dot, text: inUse ? `${text} · in use` : text };
+    return { dot, text, inUse };
   }
 
   return (
@@ -133,6 +133,7 @@ export function SettingsForm({ initial, providers }: {
                   <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${st.dot}`} />
                 </div>
                 <div className="mono mt-1 truncate text-[11px] text-muted">{st.text}</div>
+                {st.inUse && <div className="mono mt-1.5 text-[10px] uppercase tracking-[0.14em] text-moss">in use</div>}
               </button>
             );
           })}
