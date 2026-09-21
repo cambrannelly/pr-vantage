@@ -40,6 +40,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 /** "provider · model", or a hint when no key is configured. */
 async function llmLabel(): Promise<{ text: string; ok: boolean }> {
   const c = await llmConfig();
-  if (!c.apiKey) return { text: `no ${c.provider} API key`, ok: false };
+  if (!c.provider) return { text: "No LLM provider set", ok: false };
+  if (!c.apiKey) return { text: c.route === "codex" ? "ChatGPT not signed in" : `no ${c.provider} API key`, ok: false };
   return { text: `${c.provider} · ${c.model}`, ok: true };
 }

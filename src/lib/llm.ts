@@ -20,8 +20,9 @@ export type { Provider, Effort } from "./settings";
 export type Route = "anthropic" | "openai" | "codex" | "kimi";
 
 export type LlmConfig = {
-  provider: Provider;
-  route: Route;
+  /** Null until someone picks a provider on the Settings page. Nothing is assumed. */
+  provider: Provider | null;
+  route: Route | null;
   model: string;
   effort: Effort;
   /** API key, or on the codex route the current ChatGPT access token. */
@@ -31,16 +32,17 @@ export type LlmConfig = {
   accountId?: string;
 };
 
+export const NO_PROVIDER_MESSAGE = "No LLM provider set. Choose one on the Settings page.";
+
 /** Effective configuration from the settings store. */
 export async function llmConfig(): Promise<LlmConfig> {
   const s = await readSettings();
-  const provider: Provider =
-    s.provider && PROVIDERS.includes(s.provider)
-      ? s.provider
-      : (PROVIDERS.find((p) => !!keyFor(s, p) || (p === "openai" && !!s.codex)) ?? "anthropic");
+  const effort = s.effort ?? "medium";
+  const provider = s.provider && PROVIDERS.includes(s.provider) ? s.provider : null;
+  if (!provider) return { provider: null, route: null, model: "", effort, apiKey: null, baseUrl: null };
   const meta = PROVIDER_META[provider];
   const route: Route = provider === "openai" && s.openaiAuth === "chatgpt" ? "codex" : provider;
-  const base = { provider, route, model: s.model?.trim() || meta.defaultModel, effort: s.effort ?? "medium" };
+  const base = { provider, route, model: s.model?.trim() || meta.defaultModel, effort };
   if (route === "codex") {
     const cred = await codexCredential().catch(() => null);
     return { ...base, apiKey: cred?.access ?? null, accountId: cred?.accountId, baseUrl: "https://chatgpt.com/backend-api" };
@@ -77,6 +79,7 @@ export type StructuredRequest<T> = {
 
 export async function generateStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
   const cfg = await llmConfig();
+  if (!cfg.provider || !cfg.route) throw new LlmError(NO_PROVIDER_MESSAGE, "config", 401);
   if (!cfg.apiKey) {
     throw new LlmError(
       cfg.route === "codex"

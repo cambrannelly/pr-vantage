@@ -30,7 +30,7 @@ export default async function SettingsPage() {
       <SettingsForm
         initial={{
           provider: cfg.provider,
-          model: cfg.model,
+          model: cfg.provider ? cfg.model : "",
           effort: cfg.effort,
           openaiAuth: s.openaiAuth ?? "key",
           keys,

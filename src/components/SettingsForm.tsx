@@ -7,6 +7,7 @@ import type { Effort, OpenAIAuth, Provider, PROVIDER_META } from "@/lib/settings
 type KeyState = { set: boolean; hint: string | null };
 type CodexState = { signedIn: boolean; email: string | null; plan: string | null };
 type Meta = typeof PROVIDER_META;
+type Choice = { provider: Provider | null; model: string; effort: Effort; openaiAuth: OpenAIAuth };
 
 const ORDER: Provider[] = ["anthropic", "openai", "kimi"];
 const EFFORTS: { id: Effort; label: string; note: string }[] = [
@@ -17,13 +18,14 @@ const EFFORTS: { id: Effort; label: string; note: string }[] = [
 
 export function SettingsForm({ initial, providers }: {
   initial: {
-    provider: Provider; model: string; effort: Effort; openaiAuth: OpenAIAuth;
+    /** Null on a fresh install: nothing is assumed until the person picks. */
+    provider: Provider | null; model: string; effort: Effort; openaiAuth: OpenAIAuth;
     keys: Record<Provider, KeyState>; codex: CodexState;
   };
   providers: Meta;
 }) {
   const router = useRouter();
-  const [provider, setProvider] = useState<Provider>(initial.provider);
+  const [provider, setProvider] = useState<Provider | null>(initial.provider);
   const [model, setModel] = useState(initial.model);
   const [effort, setEffort] = useState<Effort>(initial.effort);
   const [openaiAuth, setOpenaiAuth] = useState<OpenAIAuth>(initial.openaiAuth);
@@ -33,24 +35,19 @@ export function SettingsForm({ initial, providers }: {
   const [models, setModels] = useState<Partial<Record<Provider, string[]>>>({});
   const [busy, setBusy] = useState<"verify" | "save" | null>(null);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
-
   /** What is on disk right now, to tell "in use" from "not yet applied". */
-  const [saved, setSaved] = useState({ provider: initial.provider, model: initial.model, effort: initial.effort, openaiAuth: initial.openaiAuth });
+  const [saved, setSaved] = useState<Choice>({ provider: initial.provider, model: initial.model, effort: initial.effort, openaiAuth: initial.openaiAuth });
 
-  const meta = providers[provider];
+  const meta = provider ? providers[provider] : null;
   const viaChatGPT = provider === "openai" && openaiAuth === "chatgpt";
-  const pendingKey = !!draftKey[provider]?.trim();
-  const dirty =
-    pendingKey ||
-    saved.provider !== provider ||
-    saved.model !== model ||
-    saved.effort !== effort ||
-    (provider === "openai" && saved.openaiAuth !== openaiAuth);
+  const draft = provider ? draftKey[provider] ?? "" : "";
+  const pendingKey = !!draft.trim();
+  const now: Choice = { provider, model, effort, openaiAuth };
+  const dirty = pendingKey || differs(saved, now);
   /** Whether the selected provider is ready to be used: a key on file, a key typed, or a ChatGPT login. */
-  const credentialed = viaChatGPT ? codex.signedIn : keys[provider].set || !!draftKey[provider]?.trim();
-  const draft = draftKey[provider] ?? "";
-  const known = models[provider];
-  const suggestedIds = meta.suggested.map((s) => s.id);
+  const credentialed = !!provider && (viaChatGPT ? codex.signedIn : keys[provider].set || pendingKey);
+  const known = provider ? models[provider] : undefined;
+  const suggestedIds = meta?.suggested.map((s) => s.id) ?? [];
   const others = (known ?? []).filter((id) => !suggestedIds.includes(id));
 
   function pickProvider(p: Provider) {
@@ -61,6 +58,7 @@ export function SettingsForm({ initial, providers }: {
   }
 
   async function verify() {
+    if (!provider) return;
     setBusy("verify");
     setNote(null);
     const res = await fetch("/api/settings/models", { method: "POST", body: JSON.stringify({ provider, apiKey: draft || undefined }) });
@@ -72,6 +70,7 @@ export function SettingsForm({ initial, providers }: {
   }
 
   async function save() {
+    if (!provider) return;
     setBusy("save");
     setNote(null);
     const patch: Record<string, unknown> = { provider, model, effort, openaiAuth };
@@ -111,7 +110,10 @@ export function SettingsForm({ initial, providers }: {
     <div className="space-y-8">
       {/* ---------- Provider ---------- */}
       <section className="reveal">
-        <div className="eyebrow">Provider</div>
+        <div className="flex items-baseline justify-between gap-4">
+          <div className="eyebrow">Provider</div>
+          {!provider && <span className="mono text-[11px] text-amber">choose one to continue</span>}
+        </div>
         <div className="mt-3 grid grid-cols-3 gap-3">
           {ORDER.map((p) => {
             const on = p === provider;
@@ -133,127 +135,129 @@ export function SettingsForm({ initial, providers }: {
         </div>
       </section>
 
-      {/* ---------- Credentials ---------- */}
-      <section className="reveal" style={{ animationDelay: "40ms" }}>
-        <div className="flex items-baseline justify-between gap-4">
-          <div className="eyebrow">{viaChatGPT ? "ChatGPT account" : `API key · ${meta.label}`}</div>
-          {!viaChatGPT && (
-            <a href={meta.console} target="_blank" rel="noreferrer" className="mono text-[11px] text-muted hover:text-amber">get a key ↗</a>
-          )}
-        </div>
-
-        {provider === "openai" && (
-          <div className="mt-3 inline-flex rounded-lg border border-line-2 bg-bg p-1 text-[13px]">
-            {(["key", "chatgpt"] as OpenAIAuth[]).map((a) => (
-              <button
-                key={a}
-                onClick={() => { setOpenaiAuth(a); setNote(null); }}
-                className={`rounded-md px-3 py-1.5 transition ${openaiAuth === a ? "bg-bg-4 text-ink" : "text-muted hover:text-ink"}`}
-              >
-                {a === "key" ? "API key" : "ChatGPT subscription"}
-                {a === "chatgpt" && <span className="mono ml-2 text-[10px] uppercase tracking-wider text-amber">unofficial</span>}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {viaChatGPT ? (
-          <CodexLogin state={codex} onChange={(c) => { setCodex(c); router.refresh(); }} />
-        ) : (
-          <div className="panel mt-3 space-y-3 p-4">
-            <div>
-              <label className="mono mb-1 block text-[11px] text-muted">
-                {keys[provider].set ? `Replace the saved key ${keys[provider].hint}` : "Paste your API key"}
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={draft}
-                  onChange={(e) => setDraftKey((d) => ({ ...d, [provider]: e.target.value }))}
-                  placeholder={keys[provider].set ? "leave blank to keep the current key" : "sk-…"}
-                  className="mono flex-1 !text-[13px]"
-                />
-                <button className="btn shrink-0" onClick={verify} disabled={busy !== null || !credentialed}>
-                  {busy === "verify" ? "Checking…" : "Verify & list models"}
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-4 text-[12px] text-muted">
-              <span>Keys are stored with owner-only permissions in <span className="mono">data/</span>, which is gitignored.</span>
-              {keys[provider].set && (
-                <button className="mono shrink-0 text-[11px] text-faint hover:text-rust" onClick={() => clearKey(provider)}>remove saved key</button>
+      {provider && meta && (
+        <>
+          {/* ---------- Credentials ---------- */}
+          <section className="reveal" style={{ animationDelay: "40ms" }}>
+            <div className="flex items-baseline justify-between gap-4">
+              <div className="eyebrow">{viaChatGPT ? "ChatGPT account" : `API key · ${meta.label}`}</div>
+              {!viaChatGPT && (
+                <a href={meta.console} target="_blank" rel="noreferrer" className="mono text-[11px] text-muted hover:text-amber">get a key ↗</a>
               )}
             </div>
-          </div>
-        )}
-      </section>
 
-      {/* ---------- Model ---------- */}
-      <section className="reveal" style={{ animationDelay: "80ms" }}>
-        <div className="flex items-baseline justify-between gap-4">
-          <div className="eyebrow">Model</div>
-          {known && <span className="mono text-[11px] text-faint">{known.length} available to this key</span>}
-        </div>
-        <div className="mt-3 space-y-2">
-          {meta.suggested.map((s) => (
-            <ModelRow key={s.id} id={s.id} note={s.note} on={model === s.id} onPick={() => setModel(s.id)} />
-          ))}
-          {others.length > 0 && (
-            <div className={`panel flex items-center gap-3 p-3 ${others.includes(model) ? "!border-amber/60 !bg-amber/5" : ""}`}>
-              <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${others.includes(model) ? "bg-amber" : "border border-faint"}`} />
-              <span className="mono shrink-0 text-[11px] text-muted">Others</span>
-              <select value={others.includes(model) ? model : ""} onChange={(e) => e.target.value && setModel(e.target.value)} className="!text-[13px]">
-                <option value="">choose…</option>
-                {others.map((id) => <option key={id} value={id}>{id}</option>)}
-              </select>
+            {provider === "openai" && (
+              <div className="mt-3 inline-flex rounded-lg border border-line-2 bg-bg p-1 text-[13px]">
+                {(["key", "chatgpt"] as OpenAIAuth[]).map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => { setOpenaiAuth(a); setNote(null); }}
+                    className={`rounded-md px-3 py-1.5 transition ${openaiAuth === a ? "bg-bg-4 text-ink" : "text-muted hover:text-ink"}`}
+                  >
+                    {a === "key" ? "API key" : "ChatGPT subscription"}
+                    {a === "chatgpt" && <span className="mono ml-2 text-[10px] uppercase tracking-wider text-amber">unofficial</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {viaChatGPT ? (
+              <CodexLogin state={codex} onChange={(c) => { setCodex(c); router.refresh(); }} />
+            ) : (
+              <div className="panel mt-3 space-y-3 p-4">
+                <div>
+                  <label className="mono mb-1 block text-[11px] text-muted">
+                    {keys[provider].set ? `Replace the saved key ${keys[provider].hint}` : "Paste your API key"}
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={draft}
+                      onChange={(e) => setDraftKey((d) => ({ ...d, [provider]: e.target.value }))}
+                      placeholder={keys[provider].set ? "leave blank to keep the current key" : "sk-…"}
+                      className="mono flex-1 !text-[13px]"
+                    />
+                    <button className="btn shrink-0" onClick={verify} disabled={busy !== null || !credentialed}>
+                      {busy === "verify" ? "Checking…" : "Verify & list models"}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-[12px] text-muted">
+                  <span>Keys are stored with owner-only permissions in <span className="mono">data/</span>, which is gitignored.</span>
+                  {keys[provider].set && (
+                    <button className="mono shrink-0 text-[11px] text-faint hover:text-rust" onClick={() => clearKey(provider)}>remove saved key</button>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* ---------- Model ---------- */}
+          <section className="reveal" style={{ animationDelay: "80ms" }}>
+            <div className="flex items-baseline justify-between gap-4">
+              <div className="eyebrow">Model</div>
+              {known && <span className="mono text-[11px] text-faint">{known.length} available to this key</span>}
             </div>
-          )}
-        </div>
-        {!viaChatGPT && !known && (
-          <p className="mt-2 text-[12px] text-muted">Verify the key above to see every model it can use, beyond the suggestions.</p>
-        )}
-      </section>
+            <div className="mt-3 space-y-2">
+              {meta.suggested.map((s) => (
+                <ModelRow key={s.id} id={s.id} note={s.note} on={model === s.id} onPick={() => setModel(s.id)} />
+              ))}
+              {others.length > 0 && (
+                <div className={`panel flex items-center gap-3 p-3 ${others.includes(model) ? "!border-amber/60 !bg-amber/5" : ""}`}>
+                  <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${others.includes(model) ? "bg-amber" : "border border-faint"}`} />
+                  <span className="mono shrink-0 text-[11px] text-muted">Others</span>
+                  <select value={others.includes(model) ? model : ""} onChange={(e) => e.target.value && setModel(e.target.value)} className="!text-[13px]">
+                    <option value="">choose…</option>
+                    {others.map((id) => <option key={id} value={id}>{id}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            {!viaChatGPT && !known && (
+              <p className="mt-2 text-[12px] text-muted">Verify the key above to see every model it can use, beyond the suggestions.</p>
+            )}
+          </section>
 
-      {/* ---------- Effort ---------- */}
-      <section className="reveal" style={{ animationDelay: "120ms" }}>
-        <div className="eyebrow">Effort</div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {EFFORTS.map((e) => (
-            <button key={e.id} onClick={() => setEffort(e.id)} className={`panel p-3 text-left transition ${effort === e.id ? "!border-amber/60 !bg-amber/5" : "hover:!border-line-2"}`}>
-              <div className="font-medium">{e.label}</div>
-              <div className="mono mt-0.5 text-[11px] text-muted">{e.note}</div>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-[12px] text-muted">Maps to each provider&apos;s reasoning setting. Lower effort cuts the wait on big PRs noticeably.</p>
-      </section>
+          {/* ---------- Effort ---------- */}
+          <section className="reveal" style={{ animationDelay: "120ms" }}>
+            <div className="eyebrow">Effort</div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {EFFORTS.map((e) => (
+                <button key={e.id} onClick={() => setEffort(e.id)} className={`panel p-3 text-left transition ${effort === e.id ? "!border-amber/60 !bg-amber/5" : "hover:!border-line-2"}`}>
+                  <div className="font-medium">{e.label}</div>
+                  <div className="mono mt-0.5 text-[11px] text-muted">{e.note}</div>
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[12px] text-muted">Maps to each provider&apos;s reasoning setting. Lower effort cuts the wait on big PRs noticeably.</p>
+          </section>
 
-      {/* ---------- Apply ---------- */}
-      <section className="reveal flex flex-wrap items-center gap-4" style={{ animationDelay: "160ms" }}>
-        {dirty || !credentialed ? (
-          <button className="btn btn-primary" onClick={save} disabled={busy !== null || !model || !credentialed}>
-            {busy === "save" ? "Applying…" : pendingKey && !dirtyExceptKey(saved, { provider, model, effort, openaiAuth }) ? "Save key" : `Use ${model}`}
-          </button>
-        ) : (
-          <span className="inline-flex items-center gap-2 text-[13px] text-moss">
-            <span className="inline-block h-2 w-2 rounded-full bg-moss" />
-            <span className="mono">{model}</span> is in use
-          </span>
-        )}
-        {note && <span className={`text-[13px] ${note.ok ? "text-moss" : "text-rust"}`}>{note.text}</span>}
-        {!credentialed && (
-          <span className="text-[13px] text-muted">{viaChatGPT ? "Sign in to ChatGPT first." : `Add a key for ${meta.label} first.`}</span>
-        )}
-      </section>
+          {/* ---------- Apply ---------- */}
+          <section className="reveal flex flex-wrap items-center gap-4" style={{ animationDelay: "160ms" }}>
+            {dirty || !credentialed ? (
+              <button className="btn btn-primary" onClick={save} disabled={busy !== null || !model || !credentialed}>
+                {busy === "save" ? "Applying…" : pendingKey && !differs(saved, now) ? "Save key" : `Use ${model}`}
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-2 text-[13px] text-moss">
+                <span className="inline-block h-2 w-2 rounded-full bg-moss" />
+                <span className="mono">{model}</span> is in use
+              </span>
+            )}
+            {note && <span className={`text-[13px] ${note.ok ? "text-moss" : "text-rust"}`}>{note.text}</span>}
+            {!credentialed && (
+              <span className="text-[13px] text-muted">{viaChatGPT ? "Sign in to ChatGPT first." : `Add a key for ${meta.label} first.`}</span>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }
 
-type Choice = { provider: Provider; model: string; effort: Effort; openaiAuth: OpenAIAuth };
-
-/** True when something other than a typed key differs from what is saved. */
-function dirtyExceptKey(saved: Choice, now: Choice): boolean {
+/** True when the provider, model, effort, or OpenAI auth mode differs from what is saved. */
+function differs(saved: Choice, now: Choice): boolean {
   return saved.provider !== now.provider || saved.model !== now.model || saved.effort !== now.effort || (now.provider === "openai" && saved.openaiAuth !== now.openaiAuth);
 }
 
@@ -267,16 +271,16 @@ function ModelRow({ id, note, on, onPick }: { id: string; note: string; on: bool
   );
 }
 
-/**
- * Device-code sign-in against the same OAuth client OpenAI's Codex CLI uses. Shows a code,
- * opens the verification page, and polls until the account appears.
- */
 type Attempt =
   | { id: string; mode: "browser"; url: string }
   | { id: string; mode: "device"; userCode: string; verificationUrl: string; intervalSeconds: number };
 
 const CHATGPT_SECURITY_SETTINGS = "https://chatgpt.com/#settings/Security";
 
+/**
+ * ChatGPT sign-in against the same OAuth client OpenAI's Codex CLI uses. Browser flow by default;
+ * device code as the fallback. Polls until the account appears.
+ */
 function CodexLogin({ state, onChange }: { state: CodexState; onChange: (c: CodexState) => void }) {
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [busy, setBusy] = useState(false);

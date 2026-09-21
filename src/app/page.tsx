@@ -15,7 +15,13 @@ export default async function Home() {
       <div className="w-full max-w-xl reveal">
         {!llm.apiKey && (
           <Link href="/settings" className="mb-8 flex items-center justify-between gap-4 rounded-lg border border-amber/40 bg-amber/5 px-4 py-3 text-[13px] transition hover:bg-amber/10">
-            <span>No model configured yet. Add an API key to start generating summaries.</span>
+            <span>
+              {!llm.provider
+                ? "No LLM provider set. Choose one to start generating summaries."
+                : llm.route === "codex"
+                  ? "ChatGPT is not signed in. Finish the sign-in to start generating summaries."
+                  : "No API key for the selected provider. Add one to start generating summaries."}
+            </span>
             <span className="mono shrink-0 text-amber">open settings ›</span>
           </Link>
         )}
