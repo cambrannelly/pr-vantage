@@ -2,6 +2,7 @@
   "name": "pr-vantage",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "start": "node scripts/start.mjs",
     "dev": "node scripts/start.mjs --dev",

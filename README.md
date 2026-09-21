@@ -168,3 +168,7 @@ OpenAI SDK, with every pass requesting JSON that matches a zod schema so provide
 - The cache is per machine. Two teammates opening the same PR each pay for a run; a shared store is the
   planned fix.
 - GitHub does not allow approving your own PR; the error surfaces in the review panel.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
