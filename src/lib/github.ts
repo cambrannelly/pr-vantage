@@ -168,7 +168,7 @@ export async function attachHeadContents(detail: PullDetail, login?: string): Pr
   const octokit = await gh(login);
   const { owner, repo } = detail.headRepo;
   const targets = detail.files.filter((f) => f.status !== "removed" && !isBinaryish(f.path));
-  const chunk = 8;
+  const chunk = 16;
   for (let i = 0; i < targets.length; i += chunk) {
     await Promise.all(
       targets.slice(i, i + chunk).map(async (f) => {

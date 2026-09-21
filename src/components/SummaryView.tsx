@@ -17,6 +17,7 @@ type Props = {
   owner: string;
   repo: string;
   number: number;
+  headSha: string;
   files: ChangedFile[];
   reviews: { author: string; state: string; body: string; submittedAt: string }[];
 };
@@ -29,10 +30,11 @@ const ATTENTION: Record<string, { cls: string; label: string; weight: number }> 
 
 const IMPORTANCE: Record<string, string> = { high: "tag-amber", medium: "tag-sky", low: "" };
 
-export function SummaryView({ owner, repo, number, files, reviews }: Props) {
+export function SummaryView({ owner, repo, number, headSha, files, reviews }: Props) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [streaming, setStreaming] = useState(false);
   const [cached, setCached] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [openDiff, setOpenDiff] = useState<Set<string>>(new Set());
@@ -44,37 +46,76 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
   const [verdict, setVerdict] = useState<Review["verdict"] | null>(null);
   const [riskFiles, setRiskFiles] = useState<string[] | null>(null);
 
-  const fetchSummary = useCallback(async (force: boolean) => {
+  /**
+   * Cached summaries come back as one JSON body. Fresh ones stream as NDJSON:
+   * `{partial}` snapshots while the model writes, then `{summary}` or `{error}`.
+   */
+  const fetchSummary = useCallback(async (force: boolean, onPartial: (s: Summary) => void, signal?: AbortSignal) => {
     const res = await fetch("/api/summary", {
       method: "POST",
-      body: JSON.stringify({ owner, repo, number, force }),
+      body: JSON.stringify({ owner, repo, number, force, headSha }),
+      signal,
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error ?? "Failed to summarize");
-    return json as { summary: Summary; cached: boolean };
-  }, [owner, repo, number]);
+    if (!(res.headers.get("content-type") ?? "").includes("ndjson")) {
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to summarize");
+      return json as { summary: Summary; cached: boolean };
+    }
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let final: { summary: Summary; cached: boolean } | null = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line) as { partial?: Summary; summary?: Summary; cached?: boolean; error?: string };
+        if (msg.error) throw new Error(msg.error);
+        if (msg.partial) onPartial(msg.partial);
+        if (msg.summary) final = { summary: msg.summary, cached: !!msg.cached };
+      }
+    }
+    if (!final) throw new Error("The summary stream ended before it finished.");
+    return final;
+  }, [owner, repo, number, headSha]);
 
-  useEffect(() => {
-    let alive = true;
-    fetchSummary(false)
-      .then((json) => { if (alive) { setSummary(json.summary); setCached(json.cached); } })
-      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [fetchSummary]);
-
-  async function load(force = false) {
-    setLoading(true);
-    setError(null);
+  /** Runs the fetch; callers put the view into its loading state first (initial state already is). */
+  const load = useCallback(async (force: boolean) => {
     try {
-      const json = await fetchSummary(force);
+      const json = await fetchSummary(force, (partial) => {
+        setSummary(partial);
+        setStreaming(true);
+        setLoading(false);
+      });
       setSummary(json.summary);
       setCached(json.cached);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+      setStreaming(false);
     }
+  }, [fetchSummary]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    const onPartial = (partial: Summary) => { setSummary(partial); setStreaming(true); setLoading(false); };
+    fetchSummary(false, onPartial, ac.signal)
+      .then((json) => { setSummary(json.summary); setCached(json.cached); })
+      .catch((e) => { if (!ac.signal.aborted) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (!ac.signal.aborted) { setLoading(false); setStreaming(false); } });
+    return () => ac.abort();
+  }, [fetchSummary]);
+
+  function regenerate() {
+    setLoading(true);
+    setError(null);
+    load(true);
   }
 
   const fileMap = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
@@ -106,22 +147,34 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_360px] gap-8">
       <div className="min-w-0 space-y-9">
-        {loading && <Skeleton />}
+        {loading && !summary && <Skeleton />}
 
         {error && (
           <div className="panel p-5">
             <div className="eyebrow !text-rust">Summary unavailable</div>
             <p className="mono mt-2 whitespace-pre-wrap text-ink-2">{error}</p>
-            <button className="btn mt-4" onClick={() => load()}>Retry</button>
+            <button className="btn mt-4" onClick={regenerate}>Retry</button>
           </div>
         )}
 
-        {summary && !loading && (
+        {summary && (
           <>
             {/* ---------- Landing: the whole PR in one screen ---------- */}
             <section className="reveal">
-              <div className="eyebrow">Summary</div>
-              <p className="display mt-3 text-[24px] leading-[1.3] text-ink"><Rich text={summary.intent} /></p>
+              <div className="eyebrow flex items-center gap-2">
+                Summary
+                {streaming && (
+                  <>
+                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber" />
+                    <span className="normal-case tracking-normal text-faint">reading the change…</span>
+                  </>
+                )}
+              </div>
+              {summary.intent ? (
+                <p className="display mt-3 text-[24px] leading-[1.3] text-ink"><Rich text={summary.intent} /></p>
+              ) : (
+                <div className="shimmer mt-4 h-7 w-4/5" />
+              )}
             </section>
 
             <section className="reveal" style={{ animationDelay: "60ms" }}>
@@ -134,9 +187,13 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
                   <span className="text-faint">▢</span> blast radius&nbsp;&nbsp;· click a node to trace it
                 </div>
               </div>
-              <div className="panel mt-3 p-3">
-                <ArchMap summary={summary} selected={selected} onSelect={(id) => { setSelected(id); setOpenChange(null); setRiskFiles(null); }} />
-              </div>
+              {summary.components.length === 0 && streaming ? (
+                <div className="shimmer mt-3 h-56" />
+              ) : (
+                <div className="panel mt-3 p-3">
+                  <ArchMap summary={summary} selected={selected} onSelect={(id) => { setSelected(id); setOpenChange(null); setRiskFiles(null); }} />
+                </div>
+              )}
               {selectedComponent && (
                 <div className="mt-3 rounded-lg border border-amber/30 bg-amber/5 p-4 reveal">
                   <div className="flex flex-wrap items-center gap-3">
@@ -156,6 +213,7 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
 
             <section className="reveal" style={{ animationDelay: "80ms" }}>
               <div className="mono flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-muted">
+                {streaming && <span className="text-amber">{summary.files.length} of {files.length} files classified…</span>}
                 <span>{changes.length} change{changes.length === 1 ? "" : "s"}</span>
                 <span>{summary.components.length} components</span>
                 <span>{files.length} files</span>
@@ -165,6 +223,12 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
               </div>
             </section>
 
+            {changes.length === 0 && streaming && (
+              <section>
+                <div className="eyebrow">What changed, in order</div>
+                <div className="mt-3 space-y-2"><div className="shimmer h-11" /><div className="shimmer h-11" /><div className="shimmer h-11 w-2/3" /></div>
+              </section>
+            )}
             {changes.length > 0 && (
               <section className="reveal" style={{ animationDelay: "100ms" }}>
                 <div className="eyebrow">What changed, in order</div>
@@ -270,13 +334,13 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
               </section>
             )}
 
-            <ReviewSection
+            {!streaming && <ReviewSection
               owner={owner}
               repo={repo}
               number={number}
               onVerdict={setVerdict}
               onTraceFiles={(files) => { setRiskFiles(files); if (files) { setSelected(null); setOpenChange(null); } }}
-            />
+            />}
 
             <section className="reveal" style={{ animationDelay: "220ms" }}>
               <Fold
@@ -289,9 +353,11 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
                 open={filesOpen}
                 onToggle={() => setShowFiles((v) => !v)}
                 extra={
-                  <button className="mono text-[11px] text-muted hover:text-ink" onClick={(e) => { e.stopPropagation(); load(true); }}>
-                    {cached ? "regenerate summary" : "fresh summary"}
-                  </button>
+                  !streaming && (
+                    <button className="mono text-[11px] text-muted hover:text-ink" onClick={(e) => { e.stopPropagation(); regenerate(); }}>
+                      {cached ? "regenerate summary" : "fresh summary"}
+                    </button>
+                  )
                 }
               >
                 <ul className="mt-3 divide-y divide-line border-y border-line">
@@ -336,7 +402,7 @@ export function SummaryView({ owner, repo, number, files, reviews }: Props) {
 
       <aside className="sticky top-8 self-start space-y-4">
         <ReviewPanel owner={owner} repo={repo} number={number} reviews={reviews} verdictHint={verdict ?? undefined} />
-        <AskPanel owner={owner} repo={repo} number={number} disabled={!summary} />
+        <AskPanel owner={owner} repo={repo} number={number} disabled={!summary || streaming} />
       </aside>
     </div>
   );

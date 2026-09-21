@@ -52,6 +52,82 @@ export const SummarySchema = z.object({
 
 export type Summary = z.infer<typeof SummarySchema>;
 
+/**
+ * What the model actually emits. Same content as Summary, but files are referenced by
+ * their index in the numbered file list from the prompt instead of by path. Paths in a
+ * big PR are the bulk of the output tokens, and every one appeared three times.
+ * Keys are ordered so the parts the reader sees first stream out first.
+ */
+const FileIdx = z.number().int().describe("Index of a file from the numbered file list.");
+
+export const ModelSummarySchema = z.object({
+  intent: SummarySchema.shape.intent,
+  components: z
+    .array(
+      SummarySchema.shape.components.element.omit({ files: true }).extend({
+        files: z.array(FileIdx).describe("Indices of files that implement this component. May be empty for 'unchanged' components outside the diff."),
+      }),
+    )
+    .describe(SummarySchema.shape.components.description ?? ""),
+  relationships: SummarySchema.shape.relationships,
+  changes: z
+    .array(
+      SummarySchema.shape.changes.element.omit({ files: true }).extend({
+        files: z.array(FileIdx).describe("Indices of files that implement this change. Every changed file belongs to exactly one change."),
+      }),
+    )
+    .describe(SummarySchema.shape.changes.description ?? ""),
+  questions: SummarySchema.shape.questions,
+  files: z
+    .array(SummarySchema.shape.files.element.omit({ path: true }).extend({ i: FileIdx }))
+    .describe("One entry per changed file, by index."),
+});
+
+export type ModelSummary = z.infer<typeof ModelSummarySchema>;
+
+/** Turn model output (file indices) into the stored shape (file paths). Tolerates partial input while streaming. */
+export function resolveSummary(raw: unknown, paths: string[], opts: { partial?: boolean } = {}): Summary {
+  const r = (raw ?? {}) as Partial<Record<keyof ModelSummary, unknown>>;
+  const path = (i: unknown) => (typeof i === "number" && Number.isInteger(i) && i >= 0 && i < paths.length ? paths[i] : null);
+  const toPaths = (xs: unknown) => (Array.isArray(xs) ? xs.map(path).filter((p): p is string => p !== null) : []);
+
+  const components = validItems(ModelSummarySchema.shape.components.element, r.components)
+    .map((c) => ({ ...c, files: toPaths(c.files) }));
+  const ids = new Set(components.map((c) => c.id));
+  const relationships = validItems(ModelSummarySchema.shape.relationships.element, r.relationships)
+    .filter((e) => ids.has(e.from) && ids.has(e.to));
+  const changes = validItems(ModelSummarySchema.shape.changes.element, r.changes)
+    .map((c) => ({ ...c, files: toPaths(c.files) }));
+  const questions = Array.isArray(r.questions) ? r.questions.filter((q): q is string => typeof q === "string") : [];
+
+  const seen = new Set<string>();
+  const files: Summary["files"] = [];
+  for (const f of validItems(ModelSummarySchema.shape.files.element, r.files)) {
+    const p = path(f.i);
+    if (!p || seen.has(p)) continue;
+    seen.add(p);
+    files.push({ path: p, role: f.role, summary: f.summary, attention: f.attention });
+  }
+  if (!opts.partial) {
+    for (const p of paths) {
+      if (!seen.has(p)) files.push({ path: p, role: "unclassified", summary: "", attention: "skim" });
+    }
+  }
+
+  return { intent: typeof r.intent === "string" ? r.intent : "", components, relationships, changes, questions, files };
+}
+
+/** Elements that fully match their schema. While streaming, the last element is usually half-written and is dropped. */
+function validItems<T extends z.ZodTypeAny>(schema: T, xs: unknown): z.infer<T>[] {
+  if (!Array.isArray(xs)) return [];
+  const out: z.infer<T>[] = [];
+  for (const x of xs) {
+    const res = schema.safeParse(x);
+    if (res.success) out.push(res.data);
+  }
+  return out;
+}
+
 /** The opinionated pass. Only runs when the reviewer asks for it. */
 export const ReviewSchema = z.object({
   verdict: z.enum(["looks-good", "needs-discussion", "needs-changes"]),

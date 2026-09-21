@@ -1,8 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { Allow, parse as parsePartial } from "partial-json";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { ReviewSchema, SummarySchema, type Review, type Summary } from "./schema";
+import { ModelSummarySchema, ReviewSchema, resolveSummary, type Review, type Summary } from "./schema";
 import { getRepoGuidance, type PullDetail } from "./github";
 
 const CACHE_DIR = path.join(process.cwd(), "data", "cache");
@@ -21,7 +22,12 @@ If the repository provides architecture notes or rules, treat them as the team's
 
 Be brief. The reader wants the shape of the change in under a minute of reading: aim for well under 500 words of prose across the whole response. Name real components from the code. Prefer concrete nouns over adjectives. Never pad, never enumerate every step. When the PR is trivial, say so briefly and mark everything as skim.
 
-Component ids in relationships and changes must match ids in components. Every changed file must appear in files exactly once and in exactly one change.`;
+Component ids in relationships and changes must match ids in components. Files are referred to by the bracketed index from the numbered file list, never by path. Every changed file index must appear in files exactly once and in exactly one change.
+
+Emit the keys in schema order: intent, components, relationships, changes, questions, files. The reader sees intent and the architecture first while the rest is still arriving.`;
+
+export const MODEL = process.env.PR_VANTAGE_MODEL?.trim() || "claude-opus-5";
+export const EFFORT = (process.env.PR_VANTAGE_EFFORT?.trim() || "medium") as "low" | "medium" | "high";
 
 const SCHEMA_VERSION = "v6";
 const REVIEW_VERSION = "r1";
@@ -77,11 +83,14 @@ export function buildPrompt(pr: PullDetail, guidance: { path: string; text: stri
   parts.push(`Author: ${pr.author}\nBranch: ${pr.headRef} -> ${pr.baseRef}\nStats: +${pr.additions} -${pr.deletions} across ${pr.files.length} files`);
   if (pr.body.trim()) parts.push(`## Author's description\n${pr.body.trim()}`);
 
-  parts.push(`## Changed files\n${pr.files.map((f) => `- ${f.status.padEnd(8)} ${f.path} (+${f.additions} -${f.deletions})`).join("\n")}`);
+  parts.push(
+    `## Changed files (refer to files by the bracketed index)\n` +
+      pr.files.map((f, i) => `- [${i}] ${f.status.padEnd(8)} ${f.path} (+${f.additions} -${f.deletions})`).join("\n"),
+  );
 
   let budget = MAX_TOTAL_CHARS;
-  for (const f of pr.files) {
-    const section: string[] = [`## File: ${f.path} (${f.status})`];
+  for (const [i, f] of pr.files.entries()) {
+    const section: string[] = [`## File [${i}]: ${f.path} (${f.status})`];
     if (f.patch) {
       const patch = f.patch.length > MAX_PATCH_CHARS ? f.patch.slice(0, MAX_PATCH_CHARS) + "\n... [patch truncated]" : f.patch;
       section.push("### Diff\n```diff\n" + patch + "\n```");
@@ -93,7 +102,7 @@ export function buildPrompt(pr: PullDetail, guidance: { path: string; text: stri
     }
     const text = section.join("\n");
     if (text.length > budget) {
-      parts.push(`## File: ${f.path} (${f.status})\n(omitted for size)`);
+      parts.push(`## File [${i}]: ${f.path} (${f.status})\n(omitted for size)`);
       continue;
     }
     budget -= text.length;
@@ -102,45 +111,87 @@ export function buildPrompt(pr: PullDetail, guidance: { path: string; text: stri
   return parts.join("\n\n");
 }
 
-/** One generation per PR head at a time, so a page load and the pre-warm job never pay twice for the same SHA. */
-const inFlight = new Map<string, Promise<Summary>>();
+export type PartialListener = (partial: Summary) => void;
 
-export async function generateSummary(owner: string, repo: string, pr: PullDetail, login?: string): Promise<Summary> {
+type InFlight = { promise: Promise<Summary>; latest: Summary | null; listeners: Set<PartialListener> };
+
+/** One generation per PR head at a time, so a page load and the pre-warm job never pay twice for the same SHA. */
+const inFlight = new Map<string, InFlight>();
+
+/**
+ * Generate (or join an in-progress generation of) the summary. `onPartial` receives
+ * progressively resolved snapshots as the model streams, so the UI can render the
+ * intent and architecture while files are still arriving.
+ */
+export async function generateSummary(owner: string, repo: string, pr: PullDetail, login?: string, onPartial?: PartialListener): Promise<Summary> {
   const cached = await readCachedSummary(owner, repo, pr.number, pr.headSha);
   if (cached) return cached;
 
   const key = `${owner}/${repo}#${pr.number}@${pr.headSha}`;
-  const pending = inFlight.get(key);
-  if (pending) return pending;
-  const run = generateSummaryUncached(owner, repo, pr, login).finally(() => inFlight.delete(key));
-  inFlight.set(key, run);
-  return run;
+  let entry = inFlight.get(key);
+  if (!entry) {
+    const e: InFlight = { promise: Promise.resolve(null as unknown as Summary), latest: null, listeners: new Set() };
+    e.promise = generateSummaryUncached(owner, repo, pr, login, (partial) => {
+      e.latest = partial;
+      for (const l of e.listeners) l(partial);
+    }).finally(() => inFlight.delete(key));
+    inFlight.set(key, e);
+    entry = e;
+  }
+  if (onPartial) {
+    entry.listeners.add(onPartial);
+    if (entry.latest) onPartial(entry.latest);
+    return entry.promise.finally(() => entry!.listeners.delete(onPartial));
+  }
+  return entry.promise;
 }
 
-async function generateSummaryUncached(owner: string, repo: string, pr: PullDetail, login?: string): Promise<Summary> {
+const PARTIAL_INTERVAL_MS = 400;
+
+async function generateSummaryUncached(owner: string, repo: string, pr: PullDetail, login?: string, onPartial?: PartialListener): Promise<Summary> {
   const guidance = await getRepoGuidance(owner, repo, pr.baseRef, login);
+  const paths = pr.files.map((f) => f.path);
   const client = new Anthropic();
-  let response;
-  try {
-    response = await client.messages.parse({
-    model: "claude-opus-5",
+
+  const stream = client.messages.stream({
+    model: MODEL,
     max_tokens: 16000,
     system: SYSTEM,
     messages: [{ role: "user", content: buildPrompt(pr, guidance) }],
-    output_config: { format: zodOutputFormat(SummarySchema), effort: "medium" },
+    output_config: { format: zodOutputFormat(ModelSummarySchema), effort: EFFORT },
+  });
+
+  if (onPartial) {
+    let text = "";
+    let last = 0;
+    stream.on("text", (delta) => {
+      text += delta;
+      const now = Date.now();
+      if (now - last < PARTIAL_INTERVAL_MS) return;
+      last = now;
+      try {
+        onPartial(resolveSummary(parsePartial(text, Allow.ALL), paths, { partial: true }));
+      } catch {
+        // half-written JSON that even the tolerant parser rejects; the next delta will do
+      }
     });
-  } catch (err) {
-    if (err instanceof Error && /Could not resolve authentication/.test(err.message)) {
-      throw new Error("No Anthropic credentials. Add ANTHROPIC_API_KEY to .env.local and restart `pnpm dev`.");
-    }
-    throw err;
   }
 
+  const started = Date.now();
+  let response;
+  try {
+    response = await stream.finalMessage();
+  } catch (err) {
+    mapAuthError(err);
+  }
+  const secs = ((Date.now() - started) / 1000).toFixed(1);
+  console.log(`[summary] ${owner}/${repo}#${pr.number} ${MODEL} effort=${EFFORT} in=${response.usage.input_tokens} out=${response.usage.output_tokens} ${secs}s`);
   if (response.stop_reason === "refusal") {
     throw new Error(`Model declined to summarize: ${response.stop_details?.explanation ?? "no explanation"}`);
   }
-  const summary = response.parsed_output;
-  if (!summary) throw new Error("Model returned output that did not match the summary schema.");
+  const raw = response.parsed_output;
+  if (!raw) throw new Error("Model returned output that did not match the summary schema.");
+  const summary = resolveSummary(raw, paths);
 
   await fs.mkdir(CACHE_DIR, { recursive: true });
   await fs.writeFile(cachePath(owner, repo, pr.number, pr.headSha), JSON.stringify(summary, null, 2));
@@ -167,11 +218,11 @@ export async function generateReview(owner: string, repo: string, pr: PullDetail
   let response;
   try {
     response = await client.messages.parse({
-      model: "claude-opus-5",
+      model: MODEL,
       max_tokens: 16000,
       system: REVIEW_SYSTEM,
       messages: [{ role: "user", content: prompt }],
-      output_config: { format: zodOutputFormat(ReviewSchema), effort: "medium" },
+      output_config: { format: zodOutputFormat(ReviewSchema), effort: EFFORT },
     });
   } catch (err) {
     mapAuthError(err);

@@ -5,6 +5,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { gh, type ChangedFile, type PullDetail } from "./github";
+import { EFFORT, MODEL } from "./summarize";
 
 const CACHE_DIR = path.join(process.cwd(), "data", "cache", "files");
 const VERSION = "f1";
@@ -89,11 +90,11 @@ export async function generateFileBreakdown(owner: string, repo: string, pr: Pul
   let response;
   try {
     response = await client.messages.parse({
-      model: "claude-opus-5",
+      model: MODEL,
       max_tokens: 8000,
       system: SYSTEM,
       messages: [{ role: "user", content: parts.join("\n\n") }],
-      output_config: { format: zodOutputFormat(FileBreakdownSchema), effort: "medium" },
+      output_config: { format: zodOutputFormat(FileBreakdownSchema), effort: EFFORT },
     });
   } catch (err) {
     if (err instanceof Error && /Could not resolve authentication/.test(err.message)) {

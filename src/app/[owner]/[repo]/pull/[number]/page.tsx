@@ -41,6 +41,7 @@ export default async function PullPage({ params }: { params: Promise<{ owner: st
         owner={owner}
         repo={repo}
         number={pr.number}
+        headSha={pr.headSha}
         files={pr.files}
         reviews={pr.reviews}
       />

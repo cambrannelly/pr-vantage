@@ -40,8 +40,11 @@ base branch, it is fed to the model as the team's conventions and the PR is judg
   Pinned repos are remembered per account.
 - `src/lib/github.ts` talks to GitHub over HTTPS with Octokit using the selected account's token.
 - `src/lib/summarize.ts` builds one prompt from the PR (patches plus full head contents of changed
-  files) and asks Claude for a structured summary matching `src/lib/schema.ts`. Results cache on disk in
-  `data/cache/` keyed by head SHA, so a summary is generated once per push.
+  files) and streams a structured summary from Claude. The model refers to files by index so it
+  does not spend output tokens repeating long paths; `resolveSummary` maps them back. Snapshots are
+  pushed to the page as they arrive, so the intent and architecture show while files are still being
+  classified. Results cache on disk in `data/cache/` keyed by head SHA, so a summary is generated
+  once per push. `PR_VANTAGE_MODEL` and `PR_VANTAGE_EFFORT` trade quality for speed.
 - `data/repos.json` holds the sidebar. `PR_VANTAGE_REPOS=owner/a,owner/b` seeds it.
 - `src/lib/prewarm.ts` polls pinned repos while the app runs and generates summaries for PR heads
   that do not have one yet, so pages open instantly. Drafts and PRs untouched for a few days are

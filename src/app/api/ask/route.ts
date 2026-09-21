@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { attachHeadContents, getPullDetail, getRepoGuidance } from "@/lib/github";
-import { buildPrompt, readCachedSummary } from "@/lib/summarize";
+import { buildPrompt, EFFORT, MODEL, readCachedSummary } from "@/lib/summarize";
 
 export const maxDuration = 300;
 
@@ -32,9 +32,9 @@ export async function POST(req: Request) {
       { role: "user", content: question },
     ];
     const response = await client.messages.create({
-      model: "claude-opus-5",
+      model: MODEL,
       max_tokens: 8000,
-      output_config: { effort: "medium" },
+      output_config: { effort: EFFORT },
       system: [
         { type: "text", text: ASK_SYSTEM },
         { type: "text", text: context, cache_control: { type: "ephemeral" } },
