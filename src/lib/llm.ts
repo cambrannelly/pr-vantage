@@ -16,14 +16,18 @@ import { codexCredential } from "./codex-auth";
 
 export type { Provider, Effort } from "./settings";
 
+/** Which wire protocol a request takes. OpenAI splits by how it is paid for. */
+export type Route = "anthropic" | "openai" | "codex" | "kimi";
+
 export type LlmConfig = {
   provider: Provider;
+  route: Route;
   model: string;
   effort: Effort;
-  /** API key, or for the ChatGPT subscription provider the current access token. */
+  /** API key, or on the codex route the current ChatGPT access token. */
   apiKey: string | null;
   baseUrl: string | null;
-  /** ChatGPT account id, subscription provider only. */
+  /** ChatGPT account id, codex route only. */
   accountId?: string;
 };
 
@@ -33,19 +37,15 @@ export async function llmConfig(): Promise<LlmConfig> {
   const provider: Provider =
     s.provider && PROVIDERS.includes(s.provider)
       ? s.provider
-      : (PROVIDERS.find((p) => (p === "codex" ? !!s.codex : !!keyFor(s, p))) ?? "anthropic");
+      : (PROVIDERS.find((p) => !!keyFor(s, p) || (p === "openai" && !!s.codex)) ?? "anthropic");
   const meta = PROVIDER_META[provider];
-  const base = {
-    provider,
-    model: s.model?.trim() || meta.defaultModel,
-    effort: s.effort ?? "medium",
-    baseUrl: provider === "custom" ? s.customBaseUrl?.trim() || null : meta.baseUrl,
-  };
-  if (provider === "codex") {
+  const route: Route = provider === "openai" && s.openaiAuth === "chatgpt" ? "codex" : provider;
+  const base = { provider, route, model: s.model?.trim() || meta.defaultModel, effort: s.effort ?? "medium" };
+  if (route === "codex") {
     const cred = await codexCredential().catch(() => null);
-    return { ...base, apiKey: cred?.access ?? null, accountId: cred?.accountId };
+    return { ...base, apiKey: cred?.access ?? null, accountId: cred?.accountId, baseUrl: "https://chatgpt.com/backend-api" };
   }
-  return { ...base, apiKey: keyFor(s, provider) };
+  return { ...base, apiKey: keyFor(s, provider), baseUrl: meta.baseUrl };
 }
 
 export class LlmError extends Error {
@@ -79,21 +79,18 @@ export async function generateStructured<T>(req: StructuredRequest<T>): Promise<
   const cfg = await llmConfig();
   if (!cfg.apiKey) {
     throw new LlmError(
-      cfg.provider === "codex"
+      cfg.route === "codex"
         ? "Not signed in to ChatGPT. Sign in on the Settings page."
         : `No ${PROVIDER_META[cfg.provider].label} API key. Add one on the Settings page.`,
       "config",
       401,
     );
   }
-  if (cfg.provider === "custom" && !cfg.baseUrl) {
-    throw new LlmError("The custom provider needs a base URL (an OpenAI-compatible /v1 endpoint). Set it on the Settings page.", "config", 500);
-  }
   if (!cfg.model) {
     throw new LlmError("Pick a model on the Settings page.", "config", 500);
   }
-  if (cfg.provider === "anthropic") return viaAnthropic(req, cfg);
-  if (cfg.provider === "codex") return viaCodex(req, cfg);
+  if (cfg.route === "anthropic") return viaAnthropic(req, cfg);
+  if (cfg.route === "codex") return viaCodex(req, cfg);
   return viaOpenAICompatible(req, cfg);
 }
 
@@ -215,7 +212,7 @@ async function viaOpenAICompatible<T>(req: StructuredRequest<T>, cfg: LlmConfig)
 }
 
 function mapOpenAIError(err: unknown, cfg: LlmConfig): Error {
-  const label = cfg.provider === "custom" ? "LLM endpoint" : cfg.provider === "kimi" ? "Kimi" : "OpenAI";
+  const label = cfg.provider === "kimi" ? "Kimi" : "OpenAI";
   if (err instanceof OpenAI.AuthenticationError) return new LlmError(`${label} rejected the API key. Check it on the Settings page.`, "auth", 401);
   if (err instanceof OpenAI.RateLimitError) return new LlmError(`${label} rate limit hit. Try again shortly.`, "rate", 429);
   if (err instanceof OpenAI.APIError) return new LlmError(`${label} API error ${err.status}: ${err.message}`, "api", 502);
@@ -359,11 +356,7 @@ async function codexHttpError(res: Response): Promise<LlmError> {
 /* ---------------- Model discovery for the settings page ---------------- */
 
 /** Ask the provider which models this key can use. Doubles as a key check. */
-export async function listModels(provider: Provider, apiKey: string, baseUrl: string | null): Promise<string[]> {
-  if (provider === "codex") {
-    // The Codex backend has no public model listing; these are the slugs OpenAI documents for ChatGPT sign-in.
-    return ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
-  }
+export async function listModels(provider: Provider, apiKey: string): Promise<string[]> {
   try {
     if (provider === "anthropic") {
       const client = new Anthropic({ apiKey });
@@ -371,12 +364,12 @@ export async function listModels(provider: Provider, apiKey: string, baseUrl: st
       for await (const m of client.models.list({ limit: 100 })) ids.push(m.id);
       return ids.sort();
     }
-    const client = new OpenAI({ apiKey, baseURL: baseUrl ?? PROVIDER_META[provider].baseUrl ?? undefined });
+    const client = new OpenAI({ apiKey, baseURL: PROVIDER_META[provider].baseUrl ?? undefined });
     const ids: string[] = [];
     for await (const m of client.models.list()) ids.push(m.id);
     const chatty = provider === "openai" ? ids.filter((id) => /^(gpt|o\d|chatgpt)/.test(id) && !/(embedding|tts|whisper|realtime|audio|image|transcribe|moderation|search)/.test(id)) : ids;
     return chatty.sort();
   } catch (err) {
-    throw provider === "anthropic" ? mapAnthropicError(err) : mapOpenAIError(err, { provider } as LlmConfig);
+    throw provider === "anthropic" ? mapAnthropicError(err) : mapOpenAIError(err, { provider, route: provider } as LlmConfig);
   }
 }

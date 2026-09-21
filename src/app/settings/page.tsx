@@ -32,7 +32,7 @@ export default async function SettingsPage() {
           provider: cfg.provider,
           model: cfg.model,
           effort: cfg.effort,
-          customBaseUrl: s.customBaseUrl ?? null,
+          openaiAuth: s.openaiAuth ?? "key",
           keys,
           codex: codex ? { signedIn: true, email: codex.email ?? null, plan: codex.planType ?? null } : { signedIn: false, email: null, plan: null },
         }}

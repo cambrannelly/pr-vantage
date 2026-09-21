@@ -7,23 +7,24 @@ import path from "node:path";
  * to import a key from an older setup.
  */
 
-export type Provider = "anthropic" | "openai" | "codex" | "kimi" | "custom";
+export type Provider = "anthropic" | "openai" | "kimi";
 export type Effort = "low" | "medium" | "high";
-export const PROVIDERS: Provider[] = ["anthropic", "openai", "codex", "kimi", "custom"];
+/** How OpenAI is paid for: an API key, or a ChatGPT subscription through the Codex backend. */
+export type OpenAIAuth = "key" | "chatgpt";
+export const PROVIDERS: Provider[] = ["anthropic", "openai", "kimi"];
 
 export type Settings = {
   provider?: Provider;
   model?: string;
   effort?: Effort;
+  openaiAuth?: OpenAIAuth;
   keys?: Partial<Record<Provider, string>>;
-  customBaseUrl?: string;
   /** ChatGPT subscription login for the Codex backend. Managed by codex-auth.ts. */
   codex?: import("./codex-auth").CodexCredential;
 };
 
-export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | null; console: string | null; defaultModel: string; suggested: { id: string; note: string }[]; auth: "key" | "chatgpt" }> = {
+export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | null; console: string; defaultModel: string; suggested: { id: string; note: string }[] }> = {
   anthropic: {
-    auth: "key",
     label: "Anthropic",
     baseUrl: null,
     console: "https://console.anthropic.com/settings/keys",
@@ -35,31 +36,18 @@ export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | 
     ],
   },
   openai: {
-    auth: "key",
     label: "OpenAI",
     baseUrl: null,
     console: "https://platform.openai.com/api-keys",
     defaultModel: "gpt-5.6-terra",
     suggested: [
       { id: "gpt-5.6-terra", note: "recommended: balanced" },
-      { id: "gpt-6-astra", note: "most capable, slower and pricier" },
+      { id: "gpt-5.6-sol", note: "deeper reasoning" },
+      { id: "gpt-6-astra", note: "most capable, slowest" },
       { id: "gpt-5.6-luna", note: "cheapest" },
     ],
   },
-  codex: {
-    auth: "chatgpt",
-    label: "ChatGPT subscription",
-    baseUrl: "https://chatgpt.com/backend-api",
-    console: null,
-    defaultModel: "gpt-5.6-terra",
-    suggested: [
-      { id: "gpt-5.6-terra", note: "recommended: balanced" },
-      { id: "gpt-5.6-sol", note: "deeper reasoning" },
-      { id: "gpt-6-astra", note: "most capable, slowest" },
-    ],
-  },
   kimi: {
-    auth: "key",
     label: "Kimi (Moonshot)",
     baseUrl: "https://api.moonshot.ai/v1",
     console: "https://platform.kimi.ai/console/api-keys",
@@ -69,14 +57,6 @@ export const PROVIDER_META: Record<Provider, { label: string; baseUrl: string | 
       { id: "kimi-k3", note: "flagship reasoning" },
       { id: "kimi-k2.7-code", note: "code tuned" },
     ],
-  },
-  custom: {
-    auth: "key",
-    label: "OpenAI-compatible endpoint",
-    baseUrl: null,
-    console: null,
-    defaultModel: "",
-    suggested: [],
   },
 };
 
@@ -103,14 +83,12 @@ async function importFromEnv(): Promise<Settings> {
   if (env("ANTHROPIC_API_KEY")) keys.anthropic = env("ANTHROPIC_API_KEY");
   if (env("OPENAI_API_KEY")) keys.openai = env("OPENAI_API_KEY");
   if (env("KIMI_API_KEY") ?? env("MOONSHOT_API_KEY")) keys.kimi = env("KIMI_API_KEY") ?? env("MOONSHOT_API_KEY");
-  if (env("PR_VANTAGE_LLM_API_KEY")) keys.custom = env("PR_VANTAGE_LLM_API_KEY");
   if (Object.keys(keys).length === 0) return {};
   const provider = (PROVIDERS.find((p) => p === env("PR_VANTAGE_PROVIDER")?.toLowerCase()) ?? PROVIDERS.find((p) => keys[p]))!;
   const imported: Settings = {
     provider,
     model: env("PR_VANTAGE_MODEL"),
     effort: (["low", "medium", "high"] as Effort[]).find((e) => e === env("PR_VANTAGE_EFFORT")?.toLowerCase()),
-    customBaseUrl: env("PR_VANTAGE_LLM_BASE_URL"),
     keys,
   };
   await writeSettings(imported);
@@ -130,7 +108,7 @@ export async function updateSettings(patch: {
   provider?: Provider;
   model?: string;
   effort?: Effort;
-  customBaseUrl?: string;
+  openaiAuth?: OpenAIAuth;
   keys?: Partial<Record<Provider, string | null>>;
 }): Promise<Settings> {
   const cur = await readSettings();
@@ -140,10 +118,11 @@ export async function updateSettings(patch: {
     else if (typeof v === "string" && v.trim()) keys[p] = v.trim();
   }
   return writeSettings({
+    ...cur,
     provider: patch.provider ?? cur.provider,
     model: patch.model !== undefined ? patch.model.trim() || undefined : cur.model,
     effort: patch.effort ?? cur.effort,
-    customBaseUrl: patch.customBaseUrl !== undefined ? patch.customBaseUrl.trim() || undefined : cur.customBaseUrl,
+    openaiAuth: patch.openaiAuth ?? cur.openaiAuth,
     keys,
   });
 }
