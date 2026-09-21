@@ -44,6 +44,8 @@ base branch, it is fed to the model as the team's conventions and the PR is judg
   `gh auth logout -u <login>`, then hit refresh in the sidebar. The app never stores tokens itself.
 - The sidebar picker lists every repo the selected account can see (own, collaborator, and org),
   most recently pushed first, and filters as you type. Pasting `owner/repo` or a URL still works.
+  Hover a pinned repo to hide it; a Hidden tab appears to bring it back. Hidden repos are not
+  pre-warmed.
 - `src/lib/github.ts` talks to GitHub over HTTPS with Octokit using the selected account's token.
 - `src/lib/summarize.ts` builds one prompt from the PR (patches plus full head contents of changed
   files) and streams a structured summary from Claude. The model refers to files by index so it

@@ -1,6 +1,6 @@
 import { defaultAccount } from "./accounts";
 import { attachHeadContents, getPullDetail, listOpenPulls } from "./github";
-import { listAllRepos } from "./repos";
+import { listActiveRepos } from "./repos";
 import { generateSummary, readCachedSummary } from "./summarize";
 
 /**
@@ -97,7 +97,7 @@ export async function tick(): Promise<void> {
   s.status.polling = true;
   try {
     const fallback = await defaultAccount().catch(() => null);
-    const repos = await listAllRepos();
+    const repos = await listActiveRepos();
     const maxAgeMs = envInt("PR_VANTAGE_PREWARM_DAYS", 7) * 86_400_000;
     for (const r of repos) {
       const login = r.account ?? fallback?.login;

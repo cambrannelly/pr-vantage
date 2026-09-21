@@ -12,6 +12,7 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [tab, setTab] = useState<"pinned" | "hidden">("pinned");
   const pathname = usePathname();
   const router = useRouter();
 
@@ -52,6 +53,18 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
     if (pathname.startsWith(`/${r.owner}/${r.repo}`)) router.push("/");
   }
 
+  async function setHidden(r: RepoRef, hidden: boolean) {
+    const res = await fetch("/api/repos", { method: "PATCH", body: JSON.stringify({ owner: r.owner, repo: r.repo, hidden }) });
+    const next: RepoRef[] = await res.json();
+    setRepos(next);
+    if (hidden && pathname.startsWith(`/${r.owner}/${r.repo}`)) router.push("/");
+    if (!hidden && next.every((x) => !x.hidden)) setTab("pinned");
+  }
+
+  const pinned = repos.filter((r) => !r.hidden);
+  const hidden = repos.filter((r) => r.hidden);
+  const shown = tab === "pinned" ? pinned : hidden;
+
   return (
     <aside className="sticky top-0 flex h-screen w-[260px] shrink-0 flex-col border-r border-line bg-bg-2/70 backdrop-blur">
       <div className="px-5 pt-6 pb-4">
@@ -63,34 +76,53 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
         </Link>
       </div>
       <div className="hairline" />
-      <div className="eyebrow px-5 pt-4 pb-2">Repositories</div>
-      <nav className="flex-1 overflow-y-auto px-2">
-        {repos.length === 0 && (
-          <p className="px-3 py-2 text-[13px] text-muted">No repos yet. Add one below.</p>
+      <div className="flex items-baseline gap-4 px-5 pt-4 pb-2">
+        <button onClick={() => setTab("pinned")} className={`eyebrow transition ${tab === "pinned" ? "!text-ink" : "hover:!text-ink-2"}`}>
+          Repositories
+        </button>
+        {(hidden.length > 0 || tab === "hidden") && (
+          <button onClick={() => setTab("hidden")} className={`eyebrow transition ${tab === "hidden" ? "!text-ink" : "hover:!text-ink-2"}`}>
+            Hidden <span className="text-faint">{hidden.length}</span>
+          </button>
         )}
-        {repos.map((r) => {
+      </div>
+      <nav className="flex-1 overflow-y-auto px-2">
+        {shown.length === 0 && (
+          <p className="px-3 py-2 text-[13px] text-muted">
+            {tab === "pinned" ? "No repos yet. Find one below." : "Nothing hidden."}
+          </p>
+        )}
+        {shown.map((r) => {
           const href = `/${r.owner}/${r.repo}`;
-          const active = pathname === href || pathname.startsWith(href + "/");
+          const active = tab === "pinned" && (pathname === href || pathname.startsWith(href + "/"));
           return (
             <div key={href} className="group relative">
-              <Link
-                href={href}
-                className={`block rounded-lg px-3 py-2 transition ${active ? "bg-bg-4 text-ink" : "text-ink-2 hover:bg-bg-3"}`}
-              >
-                <div className="mono text-[11px] text-muted">{r.owner}/</div>
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-[14px] font-medium">{r.repo}</span>
-                  <PendingDot />
+              {tab === "pinned" ? (
+                <Link
+                  href={href}
+                  className={`block rounded-lg px-3 py-2 pr-16 transition ${active ? "bg-bg-4 text-ink" : "text-ink-2 hover:bg-bg-3"}`}
+                >
+                  <div className="mono text-[11px] text-muted">{r.owner}/</div>
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[14px] font-medium">{r.repo}</span>
+                    <PendingDot />
+                  </div>
+                  {active && <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded bg-amber" />}
+                </Link>
+              ) : (
+                <div className="block rounded-lg px-3 py-2 pr-20 text-muted">
+                  <div className="mono text-[11px] text-faint">{r.owner}/</div>
+                  <div className="truncate text-[14px] font-medium">{r.repo}</div>
                 </div>
-                {active && <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded bg-amber" />}
-              </Link>
-              <button
-                onClick={() => remove(r)}
-                title="Remove from sidebar"
-                className="absolute right-2 top-2 hidden rounded px-1.5 text-[12px] text-faint hover:text-rust group-hover:block"
-              >
-                ×
-              </button>
+              )}
+              <div className="absolute right-2 top-2 hidden items-center gap-1 group-hover:flex">
+                {tab === "pinned" ? (
+                  <button onClick={() => setHidden(r, true)} title="Hide from the sidebar" className="mono rounded px-1.5 text-[11px] text-faint hover:text-ink">hide</button>
+                ) : (
+                  <button onClick={() => setHidden(r, false)} title="Show in the sidebar again" className="mono rounded px-1.5 text-[11px] text-faint hover:text-amber">unhide</button>
+                )}
+                <button onClick={() => remove(r)} title="Forget this repository" className="rounded px-1.5 text-[12px] text-faint hover:text-rust">×</button>
+              </div>
             </div>
           );
         })}

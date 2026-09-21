@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 /** Neutral landing: nothing selected. Shown on first load and after an account switch. */
 export default async function Home() {
   const me = await currentAccount().catch(() => null);
-  const repos = await listRepos(me?.login);
+  const repos = (await listRepos(me?.login)).filter((r) => !r.hidden);
 
   return (
     <div className="flex min-h-screen items-center justify-center p-12">

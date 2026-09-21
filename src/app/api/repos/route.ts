@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { validateRepo } from "@/lib/github";
 import { currentAccount } from "@/lib/accounts";
-import { addRepo, listRepos, removeRepo } from "@/lib/repos";
+import { addRepo, listRepos, removeRepo, setHidden } from "@/lib/repos";
 
 export async function GET() {
   const me = await currentAccount();
@@ -27,4 +27,10 @@ export async function DELETE(req: Request) {
   const { owner, repo } = (await req.json()) as { owner: string; repo: string };
   const me = await currentAccount();
   return NextResponse.json(await removeRepo(owner, repo, me.login));
+}
+
+export async function PATCH(req: Request) {
+  const { owner, repo, hidden } = (await req.json()) as { owner: string; repo: string; hidden: boolean };
+  const me = await currentAccount();
+  return NextResponse.json(await setHidden(owner, repo, !!hidden, me.login));
 }

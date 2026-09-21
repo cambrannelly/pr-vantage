@@ -2,8 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { gh } from "./github";
 
-/** A pinned repository. `account` is the GitHub login that pinned it; pins without one show for every account. */
-export type RepoRef = { owner: string; repo: string; description?: string; account?: string };
+/**
+ * A pinned repository. `account` is the GitHub login that pinned it; pins without one show for
+ * every account. `hidden` keeps it out of the nav and the pre-warm poller until unhidden.
+ */
+export type RepoRef = { owner: string; repo: string; description?: string; account?: string; hidden?: boolean };
 
 const FILE = path.join(process.cwd(), "data", "repos.json");
 
@@ -42,9 +45,24 @@ function dedupe(repos: RepoRef[]): RepoRef[] {
   });
 }
 
-/** Every pin plus env seeds, across all accounts. Used by the pre-warm job. */
+/** Every pin plus env seeds, across all accounts, hidden ones included. Stored records win over seeds. */
 export async function listAllRepos(): Promise<RepoRef[]> {
   return dedupe([...(await readStored()), ...seeded()]);
+}
+
+/** What the pre-warm poller should watch: everything that is not hidden. */
+export async function listActiveRepos(): Promise<RepoRef[]> {
+  return (await listAllRepos()).filter((r) => !r.hidden);
+}
+
+/** Hide or unhide a pin. Env-seeded repos get a stored record so the flag sticks. */
+export async function setHidden(owner: string, repo: string, hidden: boolean, account?: string): Promise<RepoRef[]> {
+  const stored = await readStored();
+  const existing = stored.find((r) => r.owner === owner && r.repo === repo);
+  if (existing) existing.hidden = hidden || undefined;
+  else stored.push({ owner, repo, hidden: hidden || undefined });
+  await writeStored(stored);
+  return listRepos(account);
 }
 
 /**
