@@ -70,13 +70,8 @@ export function ReviewPanel({ owner, repo, number, reviews, verdictHint }: {
 
       {posted.length > 0 && (
         <div className="mt-5 border-t border-line pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <button className="flex min-w-0 items-center gap-3 text-left" onClick={() => setShowExisting((v) => !v)}>
-              <span className="eyebrow">Existing reviews</span>
-              <span className="mono text-[11px] text-muted">
-                {summarize(posted)} · {showExisting ? "hide" : "show"}
-              </span>
-            </button>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="eyebrow">Existing reviews</span>
             <a
               href={`https://github.com/${owner}/${repo}/pull/${number}/files`}
               target="_blank"
@@ -87,6 +82,10 @@ export function ReviewPanel({ owner, repo, number, reviews, verdictHint }: {
               comments on github ↗
             </a>
           </div>
+          <button className="mono mt-1.5 flex w-full items-baseline justify-between gap-3 text-left text-[11px] text-muted" onClick={() => setShowExisting((v) => !v)}>
+            <span>{summarize(posted)}</span>
+            <span className="shrink-0 text-faint">{showExisting ? "hide" : "show"}</span>
+          </button>
           {showExisting && (
           <ul className="mt-2 divide-y divide-line">
             {posted.map((r, i) => (
