@@ -34,7 +34,7 @@ export function ArchMap({ summary, onSelect, selected }: {
 
   const maxRows = Math.max(...layers.map((l) => byLayer.get(l)!.length));
   const height = PAD * 2 + 28 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP;
-  const width = PAD * 2 + layers.length * NODE_W + (layers.length - 1) * COL_GAP;
+  const baseWidth = PAD * 2 + layers.length * NODE_W + (layers.length - 1) * COL_GAP;
 
   const pos = new Map<string, { x: number; y: number }>();
   layers.forEach((layer, ci) => {
@@ -88,8 +88,13 @@ export function ArchMap({ summary, onSelect, selected }: {
         break;
       }
     }
-    return [{ d, hot, dim, label, mx, my }];
+    // How far right this edge and its label reach; same-column loops bulge past the last column.
+    const reach = Math.max(sameCol ? a.x + NODE_W + dx : Math.max(x1, x2), mx + (label.length * LABEL_CHAR_W + 14) / 2);
+    return [{ d, hot, dim, label, mx, my, reach }];
   });
+
+  // Widen the canvas when loops or labels would otherwise be clipped at the right edge.
+  const width = Math.max(baseWidth, ...edges.map((e) => e.reach + PAD));
 
   return (
     <div>
