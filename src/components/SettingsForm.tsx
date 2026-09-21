@@ -155,7 +155,6 @@ export function SettingsForm({ initial, providers }: {
                     className={`rounded-md px-3 py-1.5 transition ${openaiAuth === a ? "bg-bg-4 text-ink" : "text-muted hover:text-ink"}`}
                   >
                     {a === "key" ? "API key" : "ChatGPT subscription"}
-                    {a === "chatgpt" && <span className="mono ml-2 text-[10px] uppercase tracking-wider text-amber">unofficial</span>}
                   </button>
                 ))}
               </div>
