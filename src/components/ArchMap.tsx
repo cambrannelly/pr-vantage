@@ -9,6 +9,8 @@ const ROW_GAP = 20;
 const PAD = 28;
 /** Small graphs scale up to fill the panel, but never past this factor so they don't look blown up. */
 const MAX_SCALE = 1.6;
+/** Approximate advance of one mono character at the edge-label size, for sizing pills. */
+const LABEL_CHAR_W = 6.7;
 
 const CHANGE_COLOR: Record<string, string> = {
   added: "var(--moss)",
@@ -53,6 +55,42 @@ export function ArchMap({ summary, onSelect, selected }: {
     }
   }
 
+  // Edge geometry, computed once so labels can be painted in a final pass above the nodes.
+  const edges = summary.relationships.flatMap((r) => {
+    const a = pos.get(r.from);
+    const b = pos.get(r.to);
+    if (!a || !b) return [];
+    const forward = b.x >= a.x;
+    const x1 = forward ? a.x + NODE_W : a.x;
+    const x2 = forward ? b.x : b.x + NODE_W;
+    const y1 = a.y + NODE_H / 2;
+    const y2 = b.y + NODE_H / 2;
+    const sameCol = a.x === b.x;
+    const dx = sameCol ? 60 : Math.max(40, Math.abs(x2 - x1) / 2);
+    const d = sameCol
+      ? `M ${a.x + NODE_W} ${y1} C ${a.x + NODE_W + dx} ${y1}, ${b.x + NODE_W + dx} ${y2}, ${b.x + NODE_W} ${y2}`
+      : `M ${x1} ${y1} C ${x1 + (forward ? dx : -dx)} ${y1}, ${x2 - (forward ? dx : -dx)} ${y2}, ${x2} ${y2}`;
+    const hot = selected ? r.from === selected || r.to === selected : false;
+    const dim = !!selected && !hot;
+    // Label sits at the connector's midpoint. Room is the horizontal gap between the two nodes
+    // (or the loop's width for same-column edges); the label is trimmed to fit that plus a little
+    // overhang, and drawn on a pill so whatever it overlaps stays legible.
+    const room = sameCol ? 2 * dx : Math.abs(x2 - x1);
+    const maxChars = Math.max(6, Math.floor((room + 40) / LABEL_CHAR_W));
+    const label = truncate(r.label, maxChars);
+    const mx = sameCol ? a.x + NODE_W + dx * 0.75 : (x1 + x2) / 2;
+    let my = (y1 + y2) / 2 - 12;
+    // A connector that crosses a column lands its midpoint on whatever node sits there.
+    // Lift the label into the row gap above that node instead of covering its title.
+    for (const n of pos.values()) {
+      if (mx > n.x - 4 && mx < n.x + NODE_W + 4 && my > n.y - 4 && my < n.y + NODE_H + 4) {
+        my = n.y - ROW_GAP / 2;
+        break;
+      }
+    }
+    return [{ d, hot, dim, label, mx, my }];
+  });
+
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} className="block w-full" style={{ maxWidth: Math.round(width * MAX_SCALE), margin: "0 auto" }} onClick={() => onSelect(null)}>
@@ -77,35 +115,11 @@ export function ArchMap({ summary, onSelect, selected }: {
           </text>
         ))}
 
-        {summary.relationships.map((r, i) => {
-          const a = pos.get(r.from);
-          const b = pos.get(r.to);
-          if (!a || !b) return null;
-          const forward = b.x >= a.x;
-          const x1 = forward ? a.x + NODE_W : a.x;
-          const x2 = forward ? b.x : b.x + NODE_W;
-          const y1 = a.y + NODE_H / 2;
-          const y2 = b.y + NODE_H / 2;
-          const sameCol = a.x === b.x;
-          const dx = sameCol ? 60 : Math.max(40, Math.abs(x2 - x1) / 2);
-          const d = sameCol
-            ? `M ${a.x + NODE_W} ${y1} C ${a.x + NODE_W + dx} ${y1}, ${b.x + NODE_W + dx} ${y2}, ${b.x + NODE_W} ${y2}`
-            : `M ${x1} ${y1} C ${x1 + (forward ? dx : -dx)} ${y1}, ${x2 - (forward ? dx : -dx)} ${y2}, ${x2} ${y2}`;
-          const hot = selected ? r.from === selected || r.to === selected : false;
-          const dim = selected && !hot;
-          const mx = (x1 + x2) / 2;
-          const my = (y1 + y2) / 2 - 6;
-          return (
-            <g key={i} opacity={dim ? 0.15 : 1} style={{ transition: "opacity 160ms" }}>
-              <path d={d} fill="none" stroke={hot ? "var(--amber)" : "var(--line-2)"} strokeWidth={hot ? 1.6 : 1.2} markerEnd={hot ? "url(#arrow-hot)" : "url(#arrow)"} />
-              {hot && (
-                <text x={mx} y={my - 2} textAnchor="middle" paintOrder="stroke" stroke="var(--bg-2)" strokeWidth={4} style={{ fontFamily: "var(--font-mono)", fontSize: 11.5, fill: "var(--amber)" }}>
-                  {r.label}
-                </text>
-              )}
-            </g>
-          );
-        })}
+        {edges.map((e, i) => (
+          <g key={i} opacity={e.dim ? 0.15 : 1} style={{ transition: "opacity 160ms" }}>
+            <path d={e.d} fill="none" stroke={e.hot ? "var(--amber)" : "var(--line-2)"} strokeWidth={e.hot ? 1.6 : 1.2} markerEnd={e.hot ? "url(#arrow-hot)" : "url(#arrow)"} />
+          </g>
+        ))}
 
         {summary.components.map((c) => {
           const p = pos.get(c.id)!;
@@ -126,6 +140,18 @@ export function ArchMap({ summary, onSelect, selected }: {
               </text>
               <text x={16} y={43} style={{ fontFamily: "var(--font-mono)", fontSize: 11, fill: "var(--muted)" }}>
                 {c.kind} · {c.change === "unchanged" ? "in blast radius" : c.change}
+              </text>
+            </g>
+          );
+        })}
+
+        {edges.filter((e) => e.hot).map((e, i) => {
+          const w = e.label.length * LABEL_CHAR_W + 14;
+          return (
+            <g key={`label-${i}`} className="reveal">
+              <rect x={e.mx - w / 2} y={e.my - 9} width={w} height={17} rx={8.5} fill="var(--bg-2)" stroke="rgba(229,163,58,0.45)" strokeWidth={1} />
+              <text x={e.mx} y={e.my + 3.5} textAnchor="middle" style={{ fontFamily: "var(--font-mono)", fontSize: 11, fill: "var(--amber)" }}>
+                {e.label}
               </text>
             </g>
           );
