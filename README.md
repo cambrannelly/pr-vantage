@@ -40,10 +40,13 @@ your pinned repos, so most pages are ready before you click.
 git clone https://github.com/cambrannelly/pr-vantage.git
 cd pr-vantage
 pnpm install
-pnpm dev
+pnpm start
 ```
 
-Then open <http://localhost:4747>.
+`pnpm start` builds on first run (and again whenever the source has changed), serves on port 4747, and
+opens your browser to it. Later runs skip the build and start in a couple of seconds. Add `--no-open`
+to keep the browser closed. `pnpm dev` runs the hot-reloading development server instead, for working
+on the app itself.
 
 1. **Pick a model.** The home page points you to Settings. Choose a provider, paste an API key (or sign
    in with ChatGPT), pick a model, and click **Use &lt;model&gt;**. "Verify & list models" checks the key
@@ -106,7 +109,7 @@ them:
 | `PR_VANTAGE_PREWARM_DAYS` | Only pre-generate PRs updated within this many days. Default 7. |
 | `PR_VANTAGE_PREWARM_CONCURRENCY` | Parallel generations. Default 1. |
 
-The dev server runs on port 4747. Change it in `package.json` if it clashes.
+The app serves on port 4747. Set `PORT` to change it.
 
 ## Where your data goes
 
@@ -143,6 +146,8 @@ in your pinned repos are usually ready before you open them.
 - **Merge button disabled.** GitHub reports conflicts, an out-of-date branch, or a draft. "Blocked by
   branch protection" stays clickable for admins; the link opens GitHub's own explanation.
 - **A summary looks off after a schema change.** Click "regenerate summary" at the top of the files list.
+- **`pnpm start` says "already running".** Something is serving on the port, probably an earlier
+  `pnpm dev`. It opens the browser to that instead of starting a second server.
 
 ## How it is built
 
