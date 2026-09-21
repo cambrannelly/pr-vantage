@@ -231,7 +231,7 @@ export async function validateRepo(owner: string, repo: string) {
   return { owner: data.owner.login, repo: data.name, description: data.description ?? "", private: data.private };
 }
 
-const GUIDANCE_FILES = [".pr-lens.md", "ARCHITECTURE.md", "CLAUDE.md", "AGENTS.md", ".cursorrules", "docs/ARCHITECTURE.md"];
+const GUIDANCE_FILES = [".pr-vantage.md", "ARCHITECTURE.md", "CLAUDE.md", "AGENTS.md", ".cursorrules", "docs/ARCHITECTURE.md"];
 const MAX_GUIDANCE_CHARS = 20_000;
 
 /** Repo-authored architecture notes and rules, read from the base branch. Same idea as Greptile consuming CLAUDE.md. */

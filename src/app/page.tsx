@@ -14,7 +14,7 @@ export default async function Home() {
           Review the <span className="display-italic text-amber">shape</span> of a change, not every line.
         </h1>
         <p className="mt-5 text-ink-2">
-          Add a repository in the sidebar. PR Lens pulls its open pull requests, reads the diffs and the
+          Add a repository in the sidebar. PR Vantage pulls its open pull requests, reads the diffs and the
           surrounding code, and lays out the architecture, intent, and the few files that deserve your eyes.
         </p>
       </div>

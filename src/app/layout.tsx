@@ -9,7 +9,7 @@ const instrument = Instrument_Sans({ variable: "--font-instrument", subsets: ["l
 const jetbrains = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "PR Lens",
+  title: "PR Vantage",
   description: "Architecture-first pull request review",
 };
 

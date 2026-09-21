@@ -1,4 +1,4 @@
-# PR Lens
+# PR Vantage
 
 Architecture-first pull request review. Pulls open PRs from GitHub, has Claude read the diff plus the
 surrounding code, and lays out intent, approach, components, relationships, risks, and which files
@@ -30,7 +30,7 @@ Open http://localhost:4747 and add a repo in the sidebar as `owner/repo` or a Gi
 7. Approve, comment, or request changes without leaving the page. Nothing is posted to the PR unless
    you do it.
 
-If the repo has `.pr-lens.md`, `ARCHITECTURE.md`, `CLAUDE.md`, `AGENTS.md`, or `.cursorrules` on the
+If the repo has `.pr-vantage.md`, `ARCHITECTURE.md`, `CLAUDE.md`, `AGENTS.md`, or `.cursorrules` on the
 base branch, it is fed to the model as the team's conventions and the PR is judged against it.
 
 ## How it works
@@ -40,7 +40,7 @@ base branch, it is fed to the model as the team's conventions and the PR is judg
 - `src/lib/summarize.ts` builds one prompt from the PR (patches plus full head contents of changed
   files) and asks Claude for a structured summary matching `src/lib/schema.ts`. Results cache on disk in
   `data/cache/` keyed by head SHA, so a summary is generated once per push.
-- `data/repos.json` holds the sidebar. `PR_LENS_REPOS=owner/a,owner/b` seeds it.
+- `data/repos.json` holds the sidebar. `PR_VANTAGE_REPOS=owner/a,owner/b` seeds it.
 
 ## Known POC limits
 

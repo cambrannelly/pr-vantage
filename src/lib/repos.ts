@@ -12,7 +12,7 @@ export async function listRepos(): Promise<RepoRef[]> {
   } catch {
     stored = [];
   }
-  const seeded = (process.env.PR_LENS_REPOS ?? "")
+  const seeded = (process.env.PR_VANTAGE_REPOS ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)

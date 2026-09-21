@@ -38,7 +38,7 @@ export function Sidebar({ repos: initial }: { repos: RepoRef[] }) {
       <div className="px-5 pt-6 pb-4">
         <Link href="/" className="block">
           <div className="display text-[26px] leading-none">
-            PR <span className="display-italic text-amber">Lens</span>
+            PR <span className="display-italic text-amber">Vantage</span>
           </div>
           <div className="eyebrow mt-2">architecture-first review</div>
         </Link>
