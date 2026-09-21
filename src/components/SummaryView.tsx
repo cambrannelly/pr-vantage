@@ -7,6 +7,8 @@ import { ArchMap } from "./ArchMap";
 import { DiffView } from "./DiffView";
 import { ReviewPanel } from "./ReviewPanel";
 import { AskPanel } from "./AskPanel";
+import { ChecksPanel } from "./ChecksPanel";
+import { MergePanel } from "./MergePanel";
 import { Rich } from "./Rich";
 import { ReviewSection } from "./ReviewSection";
 import Link from "next/link";
@@ -401,7 +403,9 @@ export function SummaryView({ owner, repo, number, headSha, files, reviews }: Pr
       </div>
 
       <aside className="sticky top-8 self-start space-y-4">
+        <ChecksPanel owner={owner} repo={repo} sha={headSha} />
         <ReviewPanel owner={owner} repo={repo} number={number} reviews={reviews} verdictHint={verdict ?? undefined} />
+        <MergePanel owner={owner} repo={repo} number={number} headSha={headSha} />
         <AskPanel owner={owner} repo={repo} number={number} disabled={!summary || streaming} />
       </aside>
     </div>

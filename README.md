@@ -29,6 +29,10 @@ Open http://localhost:4747 and add a repo in the sidebar as `owner/repo` or a Gi
    caching so follow-ups are cheap.
 7. Approve, comment, or request changes without leaving the page. Nothing is posted to the PR unless
    you do it.
+8. See CI at a glance: a collapsed Checks line rolls up GitHub Actions and commit statuses for the head
+   SHA, expands to every check with a link, and polls while anything is running.
+9. Merge with whichever strategy the repo allows (squash, merge commit, rebase). Two clicks, and the
+   merge is refused if new commits landed after the page loaded.
 
 If the repo has `.pr-vantage.md`, `ARCHITECTURE.md`, `CLAUDE.md`, `AGENTS.md`, or `.cursorrules` on the
 base branch, it is fed to the model as the team's conventions and the PR is judged against it.

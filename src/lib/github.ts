@@ -268,3 +268,123 @@ export async function getRepoGuidance(owner: string, repo: string, ref: string, 
   );
   return results.filter((r): r is { path: string; text: string } => r !== null);
 }
+
+/* ---------------- Checks (GitHub Actions and commit statuses) ---------------- */
+
+export type CheckState = "running" | "passed" | "failed" | "neutral";
+
+export type CheckRow = {
+  name: string;
+  app: string;
+  state: CheckState;
+  /** GitHub's raw conclusion or status, e.g. "in_progress", "success", "timed_out". */
+  detail: string;
+  url: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+export type ChecksSummary = {
+  sha: string;
+  checks: CheckRow[];
+  counts: Record<CheckState, number>;
+  /** Roll-up: failed if any failed, running if any still going, passed if all done and none failed. */
+  overall: CheckState | "none";
+};
+
+function checkState(status: string, conclusion: string | null): CheckState {
+  if (status !== "completed") return "running";
+  switch (conclusion) {
+    case "success":
+      return "passed";
+    case "failure":
+    case "timed_out":
+    case "cancelled":
+    case "action_required":
+    case "startup_failure":
+      return "failed";
+    default:
+      return "neutral"; // neutral, skipped, stale
+  }
+}
+
+export async function getChecks(owner: string, repo: string, sha: string, login?: string): Promise<ChecksSummary> {
+  const octokit = await gh(login);
+  const [runs, combined] = await Promise.all([
+    octokit.paginate(octokit.rest.checks.listForRef, { owner, repo, ref: sha, per_page: 100 }),
+    octokit.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha }).then((r) => r.data).catch(() => null),
+  ]);
+  const checks: CheckRow[] = runs.map((r) => ({
+    name: r.name,
+    app: r.app?.name ?? "",
+    state: checkState(r.status, r.conclusion),
+    detail: r.status === "completed" ? (r.conclusion ?? "completed") : r.status,
+    url: r.html_url ?? r.details_url ?? null,
+    startedAt: r.started_at ?? null,
+    completedAt: r.completed_at ?? null,
+  }));
+  for (const s of combined?.statuses ?? []) {
+    checks.push({
+      name: s.context,
+      app: "status",
+      state: s.state === "success" ? "passed" : s.state === "pending" ? "running" : "failed",
+      detail: s.state,
+      url: s.target_url ?? null,
+      startedAt: s.created_at,
+      completedAt: s.state === "pending" ? null : s.updated_at,
+    });
+  }
+  const order: Record<CheckState, number> = { failed: 0, running: 1, passed: 2, neutral: 3 };
+  checks.sort((a, b) => order[a.state] - order[b.state] || a.name.localeCompare(b.name));
+  const counts: Record<CheckState, number> = { running: 0, passed: 0, failed: 0, neutral: 0 };
+  for (const c of checks) counts[c.state]++;
+  const overall: ChecksSummary["overall"] =
+    checks.length === 0 ? "none" : counts.failed > 0 ? "failed" : counts.running > 0 ? "running" : counts.passed > 0 ? "passed" : "neutral";
+  return { sha, checks, counts, overall };
+}
+
+/* ---------------- Merge ---------------- */
+
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+export type MergeInfo = {
+  merged: boolean;
+  /** null while GitHub is still computing it. */
+  mergeable: boolean | null;
+  /** GitHub's mergeable_state: clean, unstable, blocked, behind, dirty, draft, unknown, has_hooks. */
+  state: string;
+  draft: boolean;
+  headSha: string;
+  baseRef: string;
+  allowed: MergeMethod[];
+  deleteBranchOnMerge: boolean;
+};
+
+export async function getMergeInfo(owner: string, repo: string, number: number, login?: string): Promise<MergeInfo> {
+  const octokit = await gh(login);
+  const [{ data: pr }, { data: r }] = await Promise.all([
+    octokit.rest.pulls.get({ owner, repo, pull_number: number }),
+    octokit.rest.repos.get({ owner, repo }),
+  ]);
+  const allowed: MergeMethod[] = [];
+  if (r.allow_squash_merge) allowed.push("squash");
+  if (r.allow_merge_commit) allowed.push("merge");
+  if (r.allow_rebase_merge) allowed.push("rebase");
+  return {
+    merged: pr.merged,
+    mergeable: pr.mergeable,
+    state: pr.mergeable_state,
+    draft: !!pr.draft,
+    headSha: pr.head.sha,
+    baseRef: pr.base.ref,
+    allowed,
+    deleteBranchOnMerge: !!r.delete_branch_on_merge,
+  };
+}
+
+/** Merge with the given strategy. `sha` guards against merging a head that moved since the reviewer looked. */
+export async function mergePull(owner: string, repo: string, number: number, method: MergeMethod, sha: string) {
+  const octokit = await gh();
+  const { data } = await octokit.rest.pulls.merge({ owner, repo, pull_number: number, merge_method: method, sha });
+  return { merged: data.merged, sha: data.sha, message: data.message };
+}
