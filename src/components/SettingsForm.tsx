@@ -236,7 +236,10 @@ export function SettingsForm({ initial, providers }: {
             {busy === "save" ? "Applying…" : pendingKey && !dirtyExceptKey(saved, { provider, model, effort, openaiAuth }) ? "Save key" : `Use ${model}`}
           </button>
         ) : (
-          <span className="btn cursor-default !border-moss/40 text-moss">✓ {model} is in use</span>
+          <span className="inline-flex items-center gap-2 text-[13px] text-moss">
+            <span className="inline-block h-2 w-2 rounded-full bg-moss" />
+            <span className="mono">{model}</span> is in use
+          </span>
         )}
         {note && <span className={`text-[13px] ${note.ok ? "text-moss" : "text-rust"}`}>{note.text}</span>}
         {!credentialed && (
