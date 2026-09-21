@@ -388,3 +388,41 @@ export async function mergePull(owner: string, repo: string, number: number, met
   const { data } = await octokit.rest.pulls.merge({ owner, repo, pull_number: number, merge_method: method, sha });
   return { merged: data.merged, sha: data.sha, message: data.message };
 }
+
+/* ---------------- Repo discovery ---------------- */
+
+export type RepoCandidate = { owner: string; repo: string; description: string; private: boolean; pushedAt: string | null };
+
+const REPOS_TTL_MS = 10 * 60_000;
+const repoLists = new Map<string, { at: number; value: Promise<RepoCandidate[]> }>();
+
+/** Every repo the login can see: own, collaborator, and org repos, most recently pushed first. Cached per account. */
+export async function listAccessibleRepos(login: string): Promise<RepoCandidate[]> {
+  const hit = repoLists.get(login);
+  if (hit && Date.now() - hit.at < REPOS_TTL_MS) return hit.value;
+  const value = (async () => {
+    const octokit = await gh(login);
+    let pages = 0;
+    const rows = await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
+      affiliation: "owner,collaborator,organization_member",
+      sort: "pushed",
+      direction: "desc",
+      per_page: 100,
+    }, (res, done) => {
+      // 500 most recently pushed is plenty for a picker; anything older is reachable by typing owner/repo.
+      pages += 1;
+      if (res.data.length < 100 || pages >= 5) done();
+      return res.data;
+    });
+    return rows.filter((r) => !r.archived).map((r) => ({
+      owner: r.owner.login,
+      repo: r.name,
+      description: r.description ?? "",
+      private: r.private,
+      pushedAt: r.pushed_at ?? null,
+    }));
+  })();
+  repoLists.set(login, { at: Date.now(), value });
+  value.catch(() => repoLists.delete(login));
+  return value;
+}

@@ -5,10 +5,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import type { RepoRef } from "@/lib/repos";
 import type { Account } from "@/lib/accounts";
+import { RepoPicker } from "./RepoPicker";
 
 export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]; accounts: Account[]; active: string | null }) {
   const [repos, setRepos] = useState(initial);
-  const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
@@ -35,9 +35,7 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
 
   const me = accounts.find((a) => a.login === active) ?? null;
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
-    if (!input.trim()) return;
+  async function add(input: string) {
     setBusy(true);
     setError(null);
     const res = await fetch("/api/repos", { method: "POST", body: JSON.stringify({ input }) });
@@ -45,7 +43,6 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
     setBusy(false);
     if (!res.ok) return setError(json.error ?? "Could not add repo");
     setRepos(json.repos);
-    setInput("");
     router.push(`/${json.added.owner}/${json.added.repo}`);
   }
 
@@ -98,19 +95,10 @@ export function Sidebar({ repos: initial, accounts, active }: { repos: RepoRef[]
           );
         })}
       </nav>
-      <form onSubmit={add} className="border-t border-line p-3">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="owner/repo or URL"
-          className="mono !text-[12.5px]"
-          disabled={busy}
-        />
+      <div className="border-t border-line p-3">
+        <RepoPicker onPick={add} busy={busy} />
         {error && <p className="mt-2 text-[12px] text-rust">{error}</p>}
-        <button type="submit" className="btn mt-2 w-full justify-center" disabled={busy || !input.trim()}>
-          {busy ? "Checking…" : "Add repository"}
-        </button>
-      </form>
+      </div>
       <div className="border-t border-line px-3 py-3">
         <div className="flex items-baseline justify-between px-2 pb-2">
           <span className="eyebrow">Reviewing as</span>
